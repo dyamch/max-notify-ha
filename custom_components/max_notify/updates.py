@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -72,6 +73,18 @@ def _extract_event_data(entry: ConfigEntry, update: dict[str, Any]) -> dict[str,
     if chat_id is None and "user_id" in recipient:
         chat_id = recipient.get("user_id")
 
+    # recipient_id: ID, который обычно используется в интеграции (User ID для лички, Chat ID для группы)
+    recipient_id = None
+    if chat_id is not None:
+        try:
+            # Группа: отрицательный chat_id → используем его; личка: используем user_id, если он есть
+            if int(chat_id) < 0:
+                recipient_id = chat_id
+            else:
+                recipient_id = user_id or chat_id
+        except (TypeError, ValueError):
+            recipient_id = user_id or chat_id
+
     # Body text (message_created)
     body = message.get("body") or {}
     text = None
@@ -98,12 +111,17 @@ def _extract_event_data(entry: ConfigEntry, update: dict[str, Any]) -> dict[str,
             cb_repr,
         )
 
+    # Для нажатий на кнопки, где нет текстовой команды /..., считаем командой payload кнопки.
+    if update_type == "message_callback" and callback_data and not command:
+        command = str(callback_data).strip()
+
     event_data: dict[str, Any] = {
         "config_entry_id": entry.entry_id,
         "update_type": update_type,
         "timestamp": timestamp,
         "user_id": user_id,
         "chat_id": chat_id,
+        "recipient_id": recipient_id,
         "text": text,
         "command": command,
         "args": args,
@@ -225,6 +243,12 @@ async def async_process_update(
     """Parse one Update and fire EVENT_MAX_NOTIFY_RECEIVED (subject to commands allowlist)."""
     try:
         dedupe_key = _update_dedup_key(update)
+        _LOGGER.debug(
+            "async_process_update: entry_id=%s, raw_update_type=%s, dedupe_key=%s",
+            entry.entry_id,
+            update.get("update_type"),
+            (dedupe_key or "")[:120],
+        )
         if DOMAIN not in hass.data:
             hass.data[DOMAIN] = {}
         if "_dedupe_lock" not in hass.data[DOMAIN]:
@@ -240,6 +264,16 @@ async def async_process_update(
                 return
             window = CALLBACK_DEDUPE_WINDOW if (update.get("update_type") == "message_callback") else DEDUPE_WINDOW_DEFAULT
             recent[dedupe_key] = now + window
+
+        # Подробный лог \"как есть\" для отладки команд, кнопок и идентификаторов чатов
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            try:
+                raw = json.dumps(update, ensure_ascii=False, default=str)
+            except Exception:
+                raw = repr(update)
+            if len(raw) > 4000:
+                raw = raw[:4000] + "..."
+            _LOGGER.debug("Raw update from Max: %s", raw)
 
         event_data = _extract_event_data(entry, update)
         update_type = event_data.get("update_type") or ""
@@ -294,6 +328,13 @@ async def _polling_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
             params["marker"] = marker
         params["types"] = types_param
 
+        _LOGGER.debug(
+            "Polling GET /updates: entry_id=%s, marker=%s, params=%s",
+            entry_id,
+            marker,
+            {**params, "timeout": POLLING_TIMEOUT},
+        )
+
         try:
             async with session.get(
                 url,
@@ -319,6 +360,13 @@ async def _polling_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
         new_marker = data.get("marker")
         if new_marker is not None:
             markers[entry_id] = new_marker
+
+        _LOGGER.debug(
+            "Polling: entry_id=%s, received %s updates, new_marker=%s",
+            entry_id,
+            len(updates_list),
+            new_marker,
+        )
 
         seen_keys: set[str] = set()
         for one in updates_list:

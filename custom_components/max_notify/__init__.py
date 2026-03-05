@@ -36,6 +36,7 @@ PLATFORMS: list[Platform] = [Platform.NOTIFY]
 def _ensure_service_registered(hass: HomeAssistant) -> None:
     """Register max_notify.send_message (idempotent). Отложенно, чтобы реестр служб был готов."""
     try:
+        _LOGGER.debug("Ensuring max_notify services are registered")
         register_send_message_service(hass)
     except Exception as e:
         _LOGGER.exception("Failed to register max_notify.send_message: %s", e)
@@ -83,6 +84,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if receive_mode == RECEIVE_MODE_POLLING:
         start_polling(hass, entry)
     elif receive_mode == RECEIVE_MODE_WEBHOOK:
+        _LOGGER.debug(
+            "async_setup_entry: ensuring webhook view registered for entry_id=%s",
+            entry.entry_id,
+        )
         _ensure_webhook_view_registered(hass)
         await register_webhook(hass, entry)
 

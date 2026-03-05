@@ -51,8 +51,10 @@ async def sync_bot_commands_to_max(hass: HomeAssistant, entry: ConfigEntry) -> b
     """Send the configured commands list to Max via PATCH /me (setMyCommands).
     Same as bot.api.setMyCommands() in the JS library — commands appear in the chat menu.
     Returns True on success."""
+    _LOGGER.debug("sync_bot_commands_to_max: entry_id=%s", entry.entry_id)
     token = entry.data.get(CONF_ACCESS_TOKEN)
     if not token:
+        _LOGGER.debug("sync_bot_commands_to_max: no token, skip")
         return False
     commands = (entry.options or {}).get(CONF_COMMANDS)
     if not isinstance(commands, list):
@@ -72,6 +74,11 @@ async def sync_bot_commands_to_max(hass: HomeAssistant, entry: ConfigEntry) -> b
     url = f"{API_BASE_URL}{API_PATH_ME}?v={API_VERSION}"
     headers = {"Authorization": token, "Content-Type": "application/json"}
     payload: dict[str, Any] = {"commands": body_commands}
+    _LOGGER.debug(
+        "sync_bot_commands_to_max: url=%s, commands_count=%s",
+        url,
+        len(body_commands),
+    )
     try:
         session = async_get_clientsession(hass)
         async with session.patch(

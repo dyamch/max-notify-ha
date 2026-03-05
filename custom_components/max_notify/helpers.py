@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def get_unique_entry_title(
@@ -19,6 +22,12 @@ def get_unique_entry_title(
         for e in hass.config_entries.async_entries(domain)
         if exclude_entry_id is None or e.entry_id != exclude_entry_id
     }
+    _LOGGER.debug(
+        "get_unique_entry_title: base_title=%s, exclude_entry_id=%s, existing_count=%s",
+        base_title,
+        exclude_entry_id,
+        len(existing),
+    )
     if base_title not in existing:
         return base_title
     n = 2

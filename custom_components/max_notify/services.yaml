@@ -33,6 +33,11 @@ send_message:
           selector:
             config_entry:
               integration: max_notify
+        recipient_id:
+          # Положительное число — личный чат (User ID), отрицательное — группа (Chat ID)
+          example: "-12345 или 12345"
+          selector:
+            text:
         chat_id:
           example: "-12345 или 12345"
           selector:
@@ -72,6 +77,10 @@ send_photo:
           selector:
             config_entry:
               integration: max_notify
+        recipient_id:
+          example: "-12345 или 12345"
+          selector:
+            text:
         chat_id:
           selector:
             text:
@@ -109,6 +118,10 @@ send_video:
           selector:
             config_entry:
               integration: max_notify
+        recipient_id:
+          example: "-12345 или 12345"
+          selector:
+            text:
         chat_id:
           selector:
             text:
@@ -146,6 +159,10 @@ send_document:
           selector:
             config_entry:
               integration: max_notify
+        recipient_id:
+          example: "-12345 или 12345"
+          selector:
+            text:
         chat_id:
           selector:
             text:

@@ -15,6 +15,7 @@ from .const import (
     CONF_BUTTONS,
     CONF_CHAT_ID,
     CONF_CONFIG_ENTRY_ID,
+    CONF_RECIPIENT_ID,
     CONF_SEND_KEYBOARD,
     CONF_USER_ID,
     DOMAIN,
@@ -35,6 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def register_send_message_service(hass: HomeAssistant) -> None:
     """Register max_notify.send_message, send_photo, send_document, send_video (idempotent)."""
+    _LOGGER.debug("Registering Max Notify services")
     hass.services.async_register(
         DOMAIN,
         SERVICE_SEND_MESSAGE,
@@ -83,6 +85,14 @@ def _resolve_entity_ids(
     chat_ids: list[int] | None = None,
     user_ids: list[int] | None = None,
 ) -> list[str]:
+    _LOGGER.debug(
+        "_resolve_entity_ids: entity_ids=%s, config_entry_id=%s, chat_ids=%s, user_ids=%s",
+        entity_ids,
+        config_entry_id,
+        chat_ids,
+        user_ids,
+    )
+
     if entity_ids:
         reg = er.async_get(hass)
         out = []
@@ -166,6 +176,7 @@ def _resolve_entity_ids(
             translation_placeholders={"config_entry_id": entry.entry_id},
         )
 
+    _LOGGER.debug("_resolve_entity_ids: resolved entity_ids=%s", entity_ids_out)
     return entity_ids_out
 
 
@@ -200,9 +211,43 @@ async def async_send_message_handler(service: ServiceCall) -> None:
     config_entry_id = data.get(CONF_CONFIG_ENTRY_ID)
     chat_id = data.get(CONF_CHAT_ID)
     user_id = data.get(CONF_USER_ID)
+    recipient_id = data.get(CONF_RECIPIENT_ID)
 
     chat_ids = _normalize_target_ids(chat_id) if chat_id is not None else None
     user_ids = _normalize_target_ids(user_id) if user_id is not None else None
+
+    # Если указан recipient_id (или список), разбираем его на chat_ids/user_ids по знаку
+    if recipient_id is not None and chat_ids is None and user_ids is None:
+        r_ids = _normalize_target_ids(recipient_id)
+        chat_ids = []
+        user_ids = []
+        for rid in r_ids:
+            if rid is None:
+                continue
+            try:
+                n = int(rid)
+            except (TypeError, ValueError):
+                continue
+            if n < 0:
+                chat_ids.append(n)
+            else:
+                user_ids.append(n)
+        if not chat_ids:
+            chat_ids = None
+        if not user_ids:
+            user_ids = None
+
+    _LOGGER.debug(
+        "async_send_message_handler: message_len=%s, title=%s, entity_ids=%s, "
+        "config_entry_id=%s, chat_ids=%s, user_ids=%s, buttons_present=%s",
+        len(message) if isinstance(message, str) else None,
+        bool(title),
+        entity_ids,
+        config_entry_id,
+        chat_ids,
+        user_ids,
+        bool(buttons),
+    )
 
     # Отправка с inline-кнопками: только по config_entry_id + chat_id/user_id (без entity_id)
     if buttons:
@@ -317,9 +362,43 @@ async def _send_photo_or_document(
     config_entry_id = data.get(CONF_CONFIG_ENTRY_ID)
     chat_id = data.get(CONF_CHAT_ID)
     user_id = data.get(CONF_USER_ID)
+    recipient_id = data.get(CONF_RECIPIENT_ID)
 
     chat_ids = _normalize_target_ids(chat_id) if chat_id is not None else None
     user_ids = _normalize_target_ids(user_id) if user_id is not None else None
+
+    # recipient_id: универсальный ID (личка/группа) — разбираем по знаку, если chat_id/user_id не заданы
+    if recipient_id is not None and chat_ids is None and user_ids is None:
+        r_ids = _normalize_target_ids(recipient_id)
+        chat_ids = []
+        user_ids = []
+        for rid in r_ids:
+            if rid is None:
+                continue
+            try:
+                n = int(rid)
+            except (TypeError, ValueError):
+                continue
+            if n < 0:
+                chat_ids.append(n)
+            else:
+                user_ids.append(n)
+        if not chat_ids:
+            chat_ids = None
+        if not user_ids:
+            user_ids = None
+
+    _LOGGER.debug(
+        "_send_photo_or_document: as_document=%s, file=%s, caption_present=%s, "
+        "entity_ids=%s, config_entry_id=%s, chat_ids=%s, user_ids=%s",
+        as_document,
+        file_path_or_url,
+        bool(caption),
+        entity_ids,
+        config_entry_id,
+        chat_ids,
+        user_ids,
+    )
 
     resolved = _resolve_entity_ids(
         hass,
@@ -378,9 +457,42 @@ async def _send_video(
     config_entry_id = data.get(CONF_CONFIG_ENTRY_ID)
     chat_id = data.get(CONF_CHAT_ID)
     user_id = data.get(CONF_USER_ID)
+    recipient_id = data.get(CONF_RECIPIENT_ID)
 
     chat_ids = _normalize_target_ids(chat_id) if chat_id is not None else None
     user_ids = _normalize_target_ids(user_id) if user_id is not None else None
+
+    # recipient_id: универсальный ID (личка/группа) — разбираем по знаку, если chat_id/user_id не заданы
+    if recipient_id is not None and chat_ids is None and user_ids is None:
+        r_ids = _normalize_target_ids(recipient_id)
+        chat_ids = []
+        user_ids = []
+        for rid in r_ids:
+            if rid is None:
+                continue
+            try:
+                n = int(rid)
+            except (TypeError, ValueError):
+                continue
+            if n < 0:
+                chat_ids.append(n)
+            else:
+                user_ids.append(n)
+        if not chat_ids:
+            chat_ids = None
+        if not user_ids:
+            user_ids = None
+
+    _LOGGER.debug(
+        "_send_video: file=%s, caption_present=%s, entity_ids=%s, "
+        "config_entry_id=%s, chat_ids=%s, user_ids=%s",
+        file_path_or_url,
+        bool(caption),
+        entity_ids,
+        config_entry_id,
+        chat_ids,
+        user_ids,
+    )
 
     resolved = _resolve_entity_ids(
         hass,

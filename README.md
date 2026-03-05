@@ -68,11 +68,14 @@
 | `update_type` | `message_created` (новое сообщение) или `message_callback` (нажатие кнопки) |
 | `config_entry_id` | ID записи интеграции |
 | `user_id`, `chat_id` | Отправитель и чат (у группы `chat_id` отрицательный) |
+| `recipient_id` | Универсальный ID получателя: **> 0** — личный чат (User ID), **< 0** — группа (Chat ID) |
 | `text` | Текст сообщения; при `message_callback` — текст сообщения с кнопками |
-| `command` | Команда без `/`, если текст начинается с `/` (напр. `/start` → `start`) |
+| `command` | Команда без `/`, если текст начинается с `/` (напр. `/start` → `start`), либо payload нажатой кнопки |
 | `args` | Остаток текста после команды |
 | `callback_data` | Payload нажатой кнопки (при `message_callback`) |
 | `event_id` | Уникальный идентификатор нажатия (для дедупликации в автоматизациях) |
+
+Для автоматизаций рекомендуется использовать **`recipient_id`** (и в триггерах, и в сервисах) — это тот же ID, который вы указываете в «Добавить чат». Поля `chat_id` и `user_id` оставлены для совместимости и низкоуровневых сценариев.
 
 ### Групповые чаты
 
@@ -81,7 +84,7 @@
 2. Назначьте бота **администратором** группы ([документация Max](https://dev.max.ru/docs-api/objects/Update)).
 3. Добавьте чат в интеграции с **отрицательным** ID (как в событии).
 
-Личный чат и группа различаются по `chat_id`: отрицательный — группа, положительный — личный. Для ответа в тот же чат: в группе передайте `config_entry_id` и `chat_id` из события; в личном — `config_entry_id` и `user_id`.
+Личный чат и группа различаются по `recipient_id`: **отрицательный** — группа (Chat ID), **положительный** — личный чат (User ID).
 
 ### Пример: ответ в тот же чат на команду
 
@@ -91,25 +94,14 @@ trigger:
     event_type: max_notify_received
     event_data:
       command: start
+
 action:
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.event.data.chat_id is defined and trigger.event.data.chat_id < 0 }}"
-        sequence:
-          - service: max_notify.send_message
-            data:
-              config_entry_id: "{{ trigger.event.data.config_entry_id }}"
-              chat_id: "{{ trigger.event.data.chat_id }}"
-              message: "Привет из группы!"
-      - conditions: []
-        default: true
-        sequence:
-          - service: max_notify.send_message
-            data:
-              config_entry_id: "{{ trigger.event.data.config_entry_id }}"
-              user_id: "{{ trigger.event.data.user_id }}"
-              message: "Привет в личку!"
+  - service: max_notify.send_message
+    data:
+      config_entry_id: "{{ trigger.event.data.config_entry_id }}"
+      recipient_id: "{{ trigger.event.data.recipient_id }}"
+      message: "Привет!"
+      send_keyboard: true
 ```
 
 ### Пример: реакция на нажатие кнопки
@@ -128,7 +120,7 @@ action:
   - service: max_notify.send_message
     data:
       config_entry_id: "{{ trigger.event.data.config_entry_id }}"
-      user_id: "{{ trigger.event.data.user_id }}"
+      recipient_id: "{{ trigger.event.data.recipient_id }}"
       message: "Свет включён"
 ```
 
@@ -171,7 +163,8 @@ data:
 |----------|----------|
 | `message` | Текст (обязательно) |
 | `title` | Заголовок |
-| `entity_id` | Сущности notify Max Notify (или в «Дополнительно»: `config_entry_id` + `chat_id` / `user_id`) |
+| `entity_id` | Сущности notify Max Notify (или в «Дополнительно»: `config_entry_id` + `recipient_id`) |
+| `recipient_id` | Универсальный ID получателя: положительный — User ID (личный), отрицательный — Chat ID (группа) |
 | `send_keyboard` | При `true` (по умолчанию) к сообщению прикрепляется клавиатура из настроек интеграции |
 | `buttons` | Inline-кнопки под сообщением (список рядов кнопок); при использовании — `config_entry_id` и `chat_id`/`user_id` |
 

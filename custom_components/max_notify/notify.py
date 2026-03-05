@@ -625,6 +625,16 @@ class MaxNotifyEntity(NotifyEntity):
         # if not notify_param:
         #     payload["notify"] = False
 
+        _LOGGER.debug(
+            "Preparing to send Max message: entry_id=%s, entity=%s, user_id=%s, chat_id=%s, format=%s, text_len=%s",
+            self._entry.entry_id,
+            self._attr_name,
+            uid,
+            cid,
+            msg_format,
+            len(text),
+        )
+
         if uid is not None and int(uid) != 0:
             resolved = await _resolve_dialog_chat_id(self.hass, token, int(uid))
             if resolved is not None:
@@ -644,31 +654,77 @@ class MaxNotifyEntity(NotifyEntity):
 
         headers = {"Authorization": token, "Content-Type": "application/json"}
 
-        try:
-            session = async_get_clientsession(self.hass)
-            async with session.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                body = await resp.text()
-                if resp.status >= 400:
-                    _LOGGER.error(
-                        "Max API send failed: status=%s body=%s request_url=%s",
-                        resp.status,
-                        body[:500],
-                        url,
-                    )
-                    if resp.status == 403 and "chatId" in body and "user_id=" in url:
-                        _LOGGER.info(
-                            "Подсказка: GET /chats не отдаёт диалоги (0 чатов), chat_id диалога через API недоступен. "
-                            "Используйте групповой чат: добавьте бота в группу в Max, получите chat_id через GET /chats "
-                            "и настройте интеграцию с типом «Групповой чат» и этим chat_id."
+        session = async_get_clientsession(self.hass)
+        last_error: Exception | None = None
+
+        _LOGGER.debug(
+            "Starting Max send with retries: url=%s, payload_keys=%s, max_attempts=5",
+            url,
+            list(payload.keys()),
+        )
+
+        for attempt in range(1, 6):
+            _LOGGER.debug("Max send attempt %s/5: url=%s", attempt, url)
+            try:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    body = await resp.text()
+                    if resp.status >= 400:
+                        _LOGGER.error(
+                            "Max API send failed: status=%s body=%s request_url=%s",
+                            resp.status,
+                            body[:500],
+                            url,
                         )
+                        if resp.status == 403 and "chatId" in body and "user_id=" in url:
+                            _LOGGER.info(
+                                "Подсказка: GET /chats не отдаёт диалоги (0 чатов), chat_id диалога через API недоступен. "
+                                "Используйте групповой чат: добавьте бота в группу в Max, получите chat_id через GET /chats "
+                                "и настройте интеграцию с типом «Групповой чат» и этим chat_id."
+                            )
+                        return
+                    _LOGGER.info("Message sent successfully (status=%s)", resp.status)
+                    _LOGGER.debug("Max send finished successfully on attempt %s/5", attempt)
                     return
-                _LOGGER.info("Message sent successfully (status=%s)", resp.status)
-        except aiohttp.ClientError as e:
-            _LOGGER.error("Max API request failed: %s", e)
-        except Exception as e:
-            _LOGGER.exception("Unexpected error sending Max message: %s", e)
+            except aiohttp.ClientError as e:
+                last_error = e
+                _LOGGER.error(
+                    "Max API request failed (attempt %s/5): %s",
+                    attempt,
+                    e,
+                )
+                if attempt < 5:
+                    delay = 2 ** (attempt - 1)
+                    _LOGGER.debug("Scheduling next Max send retry in %ss (attempt %s/5)", delay, attempt + 1)
+                    await asyncio.sleep(delay)
+            except Exception as e:
+                last_error = e
+                _LOGGER.exception("Unexpected error sending Max message: %s", e)
+                break
+
+        # Если все 5 попыток не удались, отправляем системное уведомление в HA
+        _LOGGER.error(
+            "Max message send failed after 5 attempts: last_error=%r, url=%s, entry_id=%s",
+            last_error,
+            url,
+            self._entry.entry_id,
+        )
+        message = (
+            f"Не удалось отправить сообщение через Max после 5 попыток.\n"
+            f"Ошибка: {last_error!r}\n"
+            f"URL: {url}"
+        )
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Max Notify: ошибка отправки сообщения",
+                "message": message,
+                "notification_id": f"max_notify_send_error_{self._entry.entry_id}",
+            },
+            blocking=False,
+        )

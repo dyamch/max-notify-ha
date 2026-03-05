@@ -45,6 +45,7 @@ def get_webhook_url(hass: HomeAssistant, entry: ConfigEntry) -> str:
 
 async def register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Register webhook URL with Max API (POST /subscriptions). Returns True on success."""
+    _LOGGER.debug("register_webhook: entry_id=%s", entry.entry_id)
     url = get_webhook_url(hass, entry)
     if not url or not url.startswith("https://"):
         _LOGGER.warning("Webhook URL not available or not HTTPS: %s", url or "(empty)")
@@ -66,6 +67,11 @@ async def register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api_url = f"{API_BASE_URL}{API_PATH_SUBSCRIPTIONS}"
     headers = {"Authorization": token, "Content-Type": "application/json"}
 
+    _LOGGER.debug(
+        "register_webhook: api_url=%s, body=%s",
+        api_url,
+        {**body, "secret": "***" if "secret" in body else None},
+    )
     try:
         session = async_get_clientsession(hass)
         async with session.post(
@@ -88,6 +94,7 @@ async def register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def unregister_webhook(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unregister webhook from Max API (DELETE /subscriptions?url=...). Returns True on success."""
+    _LOGGER.debug("unregister_webhook: entry_id=%s", entry.entry_id)
     url = get_webhook_url(hass, entry)
     if not url:
         return True
@@ -100,6 +107,11 @@ async def unregister_webhook(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     params = {"url": url, "v": API_VERSION}
     headers = {"Authorization": token}
 
+    _LOGGER.debug(
+        "unregister_webhook: api_url=%s, params=%s",
+        api_url,
+        params,
+    )
     try:
         session = async_get_clientsession(hass)
         async with session.delete(
@@ -148,6 +160,12 @@ class MaxNotifyWebhookView(HomeAssistantView):
             if received != secret:
                 _LOGGER.warning("Webhook secret mismatch for entry_id=%s", entry_id)
                 return web.Response(status=401, text="unauthorized")
+
+        _LOGGER.debug(
+            "Webhook POST received: entry_id=%s, headers=%s",
+            entry_id,
+            {k: v for k, v in request.headers.items() if k.lower() != WEBHOOK_SECRET_HEADER.lower()},
+        )
 
         try:
             body = await request.json()

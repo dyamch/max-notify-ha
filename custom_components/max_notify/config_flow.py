@@ -135,6 +135,10 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Step: webhook secret only; then show commands menu."""
         if user_input is not None:
             self._webhook_secret = (user_input.get(CONF_WEBHOOK_SECRET) or "").strip()
+            _LOGGER.debug(
+                "async_step_receive_options: webhook_secret_len=%s",
+                len(self._webhook_secret),
+            )
             return await self.async_step_receive_options_menu(None)
         return self.async_show_form(
             step_id="receive_options",
@@ -163,6 +167,7 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             chosen_label = user_input.get(CONF_ACTION) or choice_labels[0]
             key = label_to_key.get(chosen_label, "next")
+            _LOGGER.debug("async_step_receive_options_menu: action=%s", key)
             if key == "add_button":
                 return await self.async_step_add_button(None)
             if key == "remove_button":
