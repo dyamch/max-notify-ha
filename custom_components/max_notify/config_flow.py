@@ -228,9 +228,57 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._receive_mode = RECEIVE_MODE_SEND_ONLY
             self._webhook_secret = ""
             self._buttons_rows = []
-            return await self.async_step_recipient(None)
+            return await self.async_step_notify_recipient(None)
         return self.async_show_form(
             step_id="notify_user", data_schema=await self._schema_notify_user_async()
+        )
+
+    async def async_step_notify_recipient(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """notify.a161.ru: add immutable user_id (positive only)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                n = int(user_input[CONF_RECIPIENT_ID])
+            except (ValueError, KeyError):
+                errors["base"] = "invalid_id_format"
+            else:
+                if n <= 0:
+                    errors["base"] = "notify_user_only"
+                else:
+                    unique_id = f"user_{n}"
+                    title = f"User {n}"
+                    data = {CONF_RECIPIENT_TYPE: RECIPIENT_TYPE_USER, CONF_USER_ID: n}
+                    subentry: ConfigSubentryData = {
+                        "data": data,
+                        "subentry_type": SUBENTRY_TYPE_RECIPIENT,
+                        "title": title,
+                        "unique_id": unique_id,
+                    }
+                    options = {
+                        CONF_RECEIVE_MODE: self._receive_mode,
+                        CONF_WEBHOOK_SECRET: self._webhook_secret,
+                        CONF_BUTTONS: self._buttons_rows,
+                    }
+                    base_title = "Max Notify (notify.a161.ru)"
+                    entry_title = get_unique_entry_title(self.hass, DOMAIN, base_title)
+                    result = self.async_create_entry(
+                        title=entry_title,
+                        data={
+                            CONF_ACCESS_TOKEN: self._token,
+                            CONF_INTEGRATION_TYPE: INTEGRATION_TYPE_NOTIFY_A161,
+                            CONF_MESSAGE_FORMAT: self._message_format,
+                        },
+                        options=options,
+                    )
+                    result["subentries"] = [subentry]
+                    register_send_message_service(self.hass)
+                    return result
+        return self.async_show_form(
+            step_id="notify_recipient",
+            data_schema=vol.Schema({vol.Required(CONF_RECIPIENT_ID): vol.Coerce(int)}),
+            errors=errors,
         )
 
     async def async_step_receive_options(
@@ -468,6 +516,12 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> dict[str, type[ConfigSubentryFlow]]:
         """Return subentry types for «+ Добавить разрешённый ID чата»."""
+        if (
+            config_entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
+            == INTEGRATION_TYPE_NOTIFY_A161
+        ):
+            # notify.a161.ru user_id is fixed after initial setup.
+            return {}
         return {SUBENTRY_TYPE_RECIPIENT: RecipientSubEntryFlowHandler}
 
     async def _schema_token_async(self):
@@ -680,6 +734,8 @@ class MaxNotifyOptionsFlow(OptionsFlow):
         integration_type = entry.data.get(
             CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL
         )
+        if integration_type == INTEGRATION_TYPE_NOTIFY_A161:
+            return await self.async_step_init_notify(user_input)
         if user_input is None:
             try:
                 await async_get_translations(
@@ -695,13 +751,8 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                 )
             except Exception:
                 trans = {}
-            msg_step_id = (
-                "init_notify"
-                if integration_type == INTEGRATION_TYPE_NOTIFY_A161
-                else "init"
-            )
             msg_fmt_key_to_label = get_option_labels(
-                trans, "options", msg_step_id, "message_format", ["text", "markdown", "html"]
+                trans, "options", "init", "message_format", ["text", "markdown", "html"]
             )
             recv_key_to_label = get_option_labels(
                 trans,
@@ -724,23 +775,8 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                         data_schema=await self._schema_init_async(entry, user_input),
                         errors={"base": err},
                     )
-                if integration_type == INTEGRATION_TYPE_NOTIFY_A161 and len(token_input) != 36:
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=await self._schema_init_async(entry, user_input),
-                        errors={"base": "invalid_notify_token_length"},
-                    )
                 new_data[CONF_ACCESS_TOKEN] = token_input
             new_data[CONF_MESSAGE_FORMAT] = msg_fmt_label_to_key.get(raw_msg_fmt, raw_msg_fmt) or "text"
-            if integration_type == INTEGRATION_TYPE_NOTIFY_A161:
-                new_options = {
-                    CONF_RECEIVE_MODE: RECEIVE_MODE_SEND_ONLY,
-                    CONF_WEBHOOK_SECRET: "",
-                    CONF_BUTTONS: [],
-                }
-                self.hass.config_entries.async_update_entry(entry, data=new_data)
-                await self.hass.config_entries.async_reload(entry.entry_id)
-                return self.async_create_entry(data=new_options)
             new_receive_mode = recv_label_to_key.get(raw_recv, raw_recv) or RECEIVE_MODE_SEND_ONLY
             new_webhook_secret = (user_input.get(CONF_WEBHOOK_SECRET) or "").strip()
             if new_receive_mode == RECEIVE_MODE_SEND_ONLY:
@@ -770,6 +806,70 @@ class MaxNotifyOptionsFlow(OptionsFlow):
             step_id="init",
             data_schema=await self._schema_init_async(entry),
             description_placeholders=self._description_placeholders(entry),
+        )
+
+    async def async_step_init_notify(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Options flow for notify.a161.ru: only token and message format."""
+        entry = self.config_entry
+        integration_type = entry.data.get(
+            CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL
+        )
+        if user_input is None:
+            try:
+                await async_get_translations(
+                    self.hass, self.hass.config.language, "options", [DOMAIN]
+                )
+            except Exception:
+                pass
+        if user_input is not None:
+            try:
+                trans = await async_get_translations(
+                    self.hass, self.hass.config.language, "options", [DOMAIN]
+                )
+            except Exception:
+                trans = {}
+            msg_fmt_key_to_label = get_option_labels(
+                trans,
+                "options",
+                "init_notify",
+                "message_format",
+                ["text", "markdown", "html"],
+            )
+            msg_fmt_label_to_key = {v: k for k, v in msg_fmt_key_to_label.items()}
+            raw_msg_fmt = user_input.get(CONF_MESSAGE_FORMAT, "text")
+            new_data = dict(entry.data)
+            token_input = (user_input.get(CONF_ACCESS_TOKEN) or "").strip()
+            if token_input:
+                err = await validate_token(self.hass, token_input, integration_type)
+                if err:
+                    return self.async_show_form(
+                        step_id="init_notify",
+                        data_schema=await self._schema_init_async(entry, user_input),
+                        errors={"base": err},
+                    )
+                if len(token_input) != 36:
+                    return self.async_show_form(
+                        step_id="init_notify",
+                        data_schema=await self._schema_init_async(entry, user_input),
+                        errors={"base": "invalid_notify_token_length"},
+                    )
+                new_data[CONF_ACCESS_TOKEN] = token_input
+            new_data[CONF_MESSAGE_FORMAT] = (
+                msg_fmt_label_to_key.get(raw_msg_fmt, raw_msg_fmt) or "text"
+            )
+            new_options = {
+                CONF_RECEIVE_MODE: RECEIVE_MODE_SEND_ONLY,
+                CONF_WEBHOOK_SECRET: "",
+                CONF_BUTTONS: [],
+            }
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+            await self.hass.config_entries.async_reload(entry.entry_id)
+            return self.async_create_entry(data=new_options)
+        return self.async_show_form(
+            step_id="init_notify",
+            data_schema=await self._schema_init_async(entry),
         )
 
     async def async_step_buttons_menu(
@@ -1169,13 +1269,8 @@ class RecipientSubEntryFlowHandler(ConfigSubentryFlow):
                 integration_type = entry.data.get(
                     CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL
                 )
-                if integration_type == INTEGRATION_TYPE_NOTIFY_A161 and n <= 0:
-                    errors["base"] = "notify_user_only"
-                    return self.async_show_form(
-                        step_id="user",
-                        data_schema=vol.Schema({vol.Required(CONF_RECIPIENT_ID): vol.Coerce(int)}),
-                        errors=errors,
-                    )
+                if integration_type == INTEGRATION_TYPE_NOTIFY_A161:
+                    return self.async_abort(reason="notify_user_locked")
                 if n == 0:
                     errors["base"] = "invalid_id_format"
                 else:

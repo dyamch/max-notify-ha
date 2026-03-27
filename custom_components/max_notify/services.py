@@ -59,6 +59,22 @@ def _raise_notify_unsupported(operation: str) -> None:
     )
 
 
+def _notify_allowed_user_ids(entry: ConfigEntry) -> set[int]:
+    """Configured user_ids for notify.a161.ru entry."""
+    out: set[int] = set()
+    for subentry in (getattr(entry, "subentries", None) or {}).values():
+        if not isinstance(subentry, ConfigSubentry):
+            continue
+        uid = subentry.data.get(CONF_USER_ID)
+        if uid is None:
+            continue
+        try:
+            out.add(int(uid))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def register_send_message_service(hass: HomeAssistant) -> None:
     """Register max_notify services (send_message, send_photo, send_document, send_video, delete_message, edit_message)."""
     _LOGGER.debug("Registering Max Notify services")
@@ -495,6 +511,17 @@ async def async_send_message_handler(service: ServiceCall) -> None:
                 translation_key="invalid_config_entry",
                 translation_placeholders={"config_entry_id": config_entry_id or ""},
             )
+        if _is_notify_a161_entry(entry):
+            if chat_ids:
+                _raise_notify_unsupported("chat_id targeting")
+            allowed_user_ids = _notify_allowed_user_ids(entry)
+            for uid in user_ids or []:
+                if int(uid) not in allowed_user_ids:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="no_matching_entities",
+                        translation_placeholders={"config_entry_id": entry.entry_id},
+                    )
         from .helpers import resolve_service_inline_keyboard
         from .notify import send_message_with_buttons, send_plain_message
 

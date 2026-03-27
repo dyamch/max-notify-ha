@@ -346,7 +346,7 @@
       },
       "notify_info": {
         "title": "notify.a161.ru setup",
-        "description": "Before continuing: open {notify_site_url}, send \"Хочу подключиться\" to the service bot and save your user_id and token. Then click Submit to enter credentials in Home Assistant."
+        "description": "Before continuing: open {notify_site_url}, send \"Хочу подключиться\" to the service bot and save your user_id and token. Then click Submit to enter credentials in Home Assistant. user_id is tied to token and cannot be changed later in integration settings."
       },
       "notify_user": {
         "title": "notify.a161.ru: token",
@@ -365,6 +365,16 @@
             "markdown": "Markdown",
             "html": "HTML"
           }
+        }
+      },
+      "notify_recipient": {
+        "title": "notify.a161.ru: user_id",
+        "description": "Enter your user_id (positive number). It is tied to the token and cannot be changed later in integration settings.",
+        "data": {
+          "recipient_id": "User ID"
+        },
+        "data_description": {
+          "recipient_id": "Use only a positive number from notify.a161.ru bot response."
         }
       },
       "user": {
@@ -503,7 +513,7 @@
     "step": {
       "init_notify": {
         "title": "notify.a161.ru settings",
-        "description": "Token (leave empty to keep) and message format. notify.a161.ru supports send-only text messages.",
+        "description": "Token (leave empty to keep), message format, and configured user_id (fixed after setup). Only text sending is supported.",
         "data": {
           "access_token": "New API token (optional)",
           "message_format": "Message format"
@@ -637,7 +647,8 @@
   "config_subentries": {
     "recipient": {
       "abort": {
-        "already_configured": "This ID is already added"
+        "already_configured": "This ID is already added",
+        "notify_user_locked": "For notify.a161.ru, user_id is fixed after initial setup and cannot be changed."
       },
       "entry_type": "Chat ID",
       "error": {
