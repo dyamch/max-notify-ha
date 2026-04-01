@@ -244,37 +244,34 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except (ValueError, KeyError):
                 errors["base"] = "invalid_id_format"
             else:
-                if n <= 0:
-                    errors["base"] = "notify_user_only"
-                else:
-                    unique_id = f"user_{n}"
-                    title = f"User {n}"
-                    data = {CONF_RECIPIENT_TYPE: RECIPIENT_TYPE_USER, CONF_USER_ID: n}
-                    subentry: ConfigSubentryData = {
-                        "data": data,
-                        "subentry_type": SUBENTRY_TYPE_RECIPIENT,
-                        "title": title,
-                        "unique_id": unique_id,
-                    }
-                    options = {
-                        CONF_RECEIVE_MODE: self._receive_mode,
-                        CONF_WEBHOOK_SECRET: self._webhook_secret,
-                        CONF_BUTTONS: self._buttons_rows,
-                    }
-                    base_title = "Max Notify (notify.a161.ru)"
-                    entry_title = get_unique_entry_title(self.hass, DOMAIN, base_title)
-                    result = self.async_create_entry(
-                        title=entry_title,
-                        data={
-                            CONF_ACCESS_TOKEN: self._token,
-                            CONF_INTEGRATION_TYPE: INTEGRATION_TYPE_NOTIFY_A161,
-                            CONF_MESSAGE_FORMAT: self._message_format,
-                        },
-                        options=options,
-                    )
-                    result["subentries"] = [subentry]
-                    register_send_message_service(self.hass)
-                    return result
+                unique_id = f"user_{n}"
+                title = f"User {n}"
+                data = {CONF_RECIPIENT_TYPE: RECIPIENT_TYPE_USER, CONF_USER_ID: n}
+                subentry: ConfigSubentryData = {
+                    "data": data,
+                    "subentry_type": SUBENTRY_TYPE_RECIPIENT,
+                    "title": title,
+                    "unique_id": unique_id,
+                }
+                options = {
+                    CONF_RECEIVE_MODE: self._receive_mode,
+                    CONF_WEBHOOK_SECRET: self._webhook_secret,
+                    CONF_BUTTONS: self._buttons_rows,
+                }
+                base_title = "Max Notify (notify.a161.ru)"
+                entry_title = get_unique_entry_title(self.hass, DOMAIN, base_title)
+                result = self.async_create_entry(
+                    title=entry_title,
+                    data={
+                        CONF_ACCESS_TOKEN: self._token,
+                        CONF_INTEGRATION_TYPE: INTEGRATION_TYPE_NOTIFY_A161,
+                        CONF_MESSAGE_FORMAT: self._message_format,
+                    },
+                    options=options,
+                )
+                result["subentries"] = [subentry]
+                register_send_message_service(self.hass)
+                return result
         return self.async_show_form(
             step_id="notify_recipient",
             data_schema=vol.Schema({vol.Required(CONF_RECIPIENT_ID): vol.Coerce(int)}),
