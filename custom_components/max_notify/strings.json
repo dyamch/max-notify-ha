@@ -436,7 +436,7 @@
     "recipient": {
       "abort": {
         "already_configured": "This ID is already added",
-        "notify_user_locked": "For notify.a161.ru, user_id is fixed after initial setup and cannot be changed."
+        "notify_user_locked": "You cannot add chats for notify.a161.ru here. Add another Max Notify integration to use a different recipient."
       },
       "entry_type": "Chat ID",
       "error": {

@@ -648,7 +648,7 @@
     "recipient": {
       "abort": {
         "already_configured": "Этот ID уже добавлен",
-        "notify_user_locked": "Для notify.a161.ru user_id фиксируется при первой настройке и не может быть изменён."
+        "notify_user_locked": "Для notify.a161.ru нельзя добавлять чаты в этой записи. Добавьте новую интеграцию Max Notify для другого получателя."
       },
       "entry_type": "ID чата",
       "error": {

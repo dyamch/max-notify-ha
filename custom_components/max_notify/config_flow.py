@@ -512,13 +512,7 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_supported_subentry_types(
         config_entry: config_entries.ConfigEntry,
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        """Return subentry types for «+ Добавить разрешённый ID чата»."""
-        if (
-            config_entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
-            == INTEGRATION_TYPE_NOTIFY_A161
-        ):
-            # notify.a161.ru user_id is fixed after initial setup.
-            return {}
+        """Тип subentry «Добавить чат» для всех записей; для notify.a161.ru поток сразу прерывается с подсказкой."""
         return {SUBENTRY_TYPE_RECIPIENT: RecipientSubEntryFlowHandler}
 
     async def _schema_token_async(self):
@@ -1255,6 +1249,13 @@ class RecipientSubEntryFlowHandler(ConfigSubentryFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         """Добавить разрешённый ID чата/пользователя."""
+        entry = self._get_entry()
+        if (
+            entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
+            == INTEGRATION_TYPE_NOTIFY_A161
+        ):
+            return self.async_abort(reason="notify_user_locked")
+
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -1262,12 +1263,6 @@ class RecipientSubEntryFlowHandler(ConfigSubentryFlow):
             except (ValueError, KeyError):
                 errors["base"] = "invalid_id_format"
             else:
-                entry = self._get_entry()
-                integration_type = entry.data.get(
-                    CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL
-                )
-                if integration_type == INTEGRATION_TYPE_NOTIFY_A161:
-                    return self.async_abort(reason="notify_user_locked")
                 if n == 0:
                     errors["base"] = "invalid_id_format"
                 else:
