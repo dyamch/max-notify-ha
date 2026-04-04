@@ -138,7 +138,7 @@
       },
       "notify_user": {
         "title": "notify.a161.ru: token",
-        "description": "Enter token and message format. Next you can add optional keyboard buttons, then user_id. Receive mode is Send only.",
+        "description": "Enter token and message format, then user_id. Receive mode is Send only.",
         "data": {
           "access_token": "Access token",
           "message_format": "Message format"
