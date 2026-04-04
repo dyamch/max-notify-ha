@@ -359,14 +359,15 @@ async def _post_message_with_retry(
                         await asyncio.sleep(delay)
                         continue
                 _LOGGER.error("Max API send %s failed: status=%s body=%s", log_label, resp.status, body[:500])
-                if (
-                    log_label in ("Video", "notify_a161_video")
-                    and resp.status == 400
-                    and "attachment.not.ready" in body
-                ):
-                    _LOGGER.error(
-                        "Max is still processing the video; increase `count_requests` on send_video for large files."
-                    )
+                if resp.status == 400 and "attachment.not.ready" in body:
+                    if log_label in ("Video", "notify_a161_video"):
+                        _LOGGER.error(
+                            "Max is still processing the video; increase `count_requests` on send_video for large files."
+                        )
+                    elif log_label == "notify_a161_media":
+                        _LOGGER.error(
+                            "Max is still processing the attachment; increase `count_requests` on send_photo or send_document for large files."
+                        )
                 return False
         except aiohttp.ClientError as e:
             _LOGGER.error("Max API send %s request failed: %s", log_label, e)
@@ -907,9 +908,9 @@ async def upload_image_and_send(
             msg_url,
             headers,
             payload_a161,
-            (),
+            FILE_READY_RETRY_DELAYS,
             "notify_a161_media",
-            count_requests if count_requests is not None else 1,
+            count_requests,
             on_success=_on_success_a161,
         )
         return
