@@ -237,23 +237,26 @@
       },
       "add_button": {
         "title": "Add button",
-        "description": "Button type, label and (for callback) payload. Current: {buttons_list}",
+        "description": "Button type, label, and for callback payload or for link an http(s) URL. Current: {buttons_list}",
         "data": {
           "button_row": "Row",
           "button_type": "Type",
           "button_text": "Button label",
-          "button_payload": "Payload (callback only)"
+          "button_payload": "Payload (callback only)",
+          "button_url": "URL (link only)"
         },
         "data_description": {
           "button_row": "Row to add the button to",
-          "button_type": "callback or message",
+          "button_type": "callback, message, or link (opens a website)",
           "button_text": "Label on the button",
-          "button_payload": "For callback buttons: this value is sent in the event max_notify_received as callback_data. Use it in automation triggers to identify the button (e.g. light_on, light_off, scene_kitchen)."
+          "button_payload": "For callback buttons: this value is sent in the event max_notify_received as callback_data. Use it in automation triggers to identify the button (e.g. light_on, light_off, scene_kitchen).",
+          "button_url": "For link buttons: must start with http:// or https://"
         },
         "options": {
           "button_type": {
             "callback": "Callback",
-            "message": "Message"
+            "message": "Message",
+            "link": "Link"
           }
         },
         "menu_options": {
@@ -290,7 +293,8 @@
       "invalid_id_format": "Enter an integer (positive — personal chat, negative — group)",
       "notify_user_only": "For notify.a161.ru use only positive recipient IDs (user_id).",
       "invalid_command_name": "Enter a command name (no slash).",
-      "invalid_button_text": "Enter a button label."
+      "invalid_button_text": "Enter a button label.",
+      "invalid_button_url": "Enter an http(s) URL for link buttons."
     },
     "abort": {
       "already_configured": "This configuration is already added",
@@ -361,23 +365,26 @@
       },
       "opt_add_button": {
         "title": "Add button",
-        "description": "Button type, label and (for callback) payload. Current: {buttons_list}",
+        "description": "Button type, label, and for callback payload or for link an http(s) URL. Current: {buttons_list}",
         "data": {
           "button_row": "Row",
           "button_type": "Type",
           "button_text": "Button label",
-          "button_payload": "Payload (callback only)"
+          "button_payload": "Payload (callback only)",
+          "button_url": "URL (link only)"
         },
         "data_description": {
           "button_row": "Row to add the button to",
-          "button_type": "callback or message",
+          "button_type": "callback, message, or link (opens a website)",
           "button_text": "Label on the button",
-          "button_payload": "For callback buttons: this value is sent in the event max_notify_received as callback_data. Use it in automation triggers to identify the button (e.g. light_on, light_off, scene_kitchen)."
+          "button_payload": "For callback buttons: this value is sent in the event max_notify_received as callback_data. Use it in automation triggers to identify the button (e.g. light_on, light_off, scene_kitchen).",
+          "button_url": "For link buttons: must start with http:// or https://"
         },
         "options": {
           "button_type": {
             "callback": "Callback",
-            "message": "Message"
+            "message": "Message",
+            "link": "Link"
           }
         },
         "menu_options": {
@@ -406,18 +413,27 @@
       },
       "opt_edit_button_edit": {
         "title": "Edit button",
-        "description": "Change row, type, label or payload. Current: {buttons_list}",
+        "description": "Change row, type, label, payload, or link URL. Current: {buttons_list}",
         "data": {
           "button_row": "Row",
           "button_type": "Type",
           "button_text": "Button label",
-          "button_payload": "Payload (callback only)"
+          "button_payload": "Payload (callback only)",
+          "button_url": "URL (link only)"
         },
         "data_description": {
           "button_row": "Row to place the button in",
-          "button_type": "callback or message",
+          "button_type": "callback, message, or link (opens a website)",
           "button_text": "Label on the button",
-          "button_payload": "For callback buttons: this value is sent in the event max_notify_received as callback_data. Use it in automation triggers to identify the button (e.g. light_on, light_off, scene_kitchen)."
+          "button_payload": "For callback buttons: this value is sent in the event max_notify_received as callback_data. Use it in automation triggers to identify the button (e.g. light_on, light_off, scene_kitchen).",
+          "button_url": "For link buttons: must start with http:// or https://"
+        },
+        "options": {
+          "button_type": {
+            "callback": "Callback",
+            "message": "Message",
+            "link": "Link"
+          }
         }
       },
       "opt_remove_button": {

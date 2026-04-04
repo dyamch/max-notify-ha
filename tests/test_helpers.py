@@ -30,6 +30,16 @@ class TestNormalizeButtons:
         assert result[0][0] == {"type": "callback", "text": "Ok", "payload": "ok"}
         assert result[1][0] == {"type": "message", "text": "Cancel"}
 
+    def test_link_button_with_url(self) -> None:
+        raw = [[{"type": "link", "text": "Site", "url": "https://example.com"}]]
+        assert normalize_buttons(raw) == [
+            [{"type": "link", "text": "Site", "url": "https://example.com"}]
+        ]
+
+    def test_link_skipped_without_url(self) -> None:
+        raw = [[{"type": "link", "text": "Site", "url": ""}]]
+        assert normalize_buttons(raw) == []
+
     def test_defaults_to_callback(self) -> None:
         raw = [[{"text": "X"}]]  # no type
         result = normalize_buttons(raw)
@@ -75,6 +85,15 @@ class TestNormalizeServiceButtons:
         raw = [[{"type": "callback", "text": "A", "payload": "a"}]]
         result = normalize_service_buttons(raw)
         assert result[0][0]["payload"] == "a"
+
+    def test_link_row_format(self) -> None:
+        raw = [[{"type": "link", "text": "Open", "url": "https://a.ru"}]]
+        result = normalize_service_buttons(raw)
+        assert result[0][0] == {
+            "type": "link",
+            "text": "Open",
+            "url": "https://a.ru",
+        }
 
     def test_multi_rows_list_of_mappings_format(self) -> None:
         raw = [{"A1": "a1", "A2": "a2"}, {"B1": "b1"}]
@@ -127,6 +146,13 @@ class TestButtonsDisplayStr:
     def test_without_payload(self) -> None:
         buttons = [[{"type": "message", "text": "Off"}]]
         assert buttons_display_str(buttons) == "Off"
+
+    def test_link_shows_url(self) -> None:
+        buttons = [
+            [{"type": "link", "text": "Go", "url": "https://example.com"}]
+        ]
+        assert "example.com" in buttons_display_str(buttons)
+        assert "Go" in buttons_display_str(buttons)
 
 
 class TestButtonsChoiceList:

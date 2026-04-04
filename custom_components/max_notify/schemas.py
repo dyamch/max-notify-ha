@@ -17,12 +17,21 @@ from .const import (
     CONF_USER_ID,
 )
 
-_BUTTON_SCHEMA = vol.Schema(
-    {
-        vol.Required("type"): vol.In(["callback", "message"]),
-        vol.Required("text"): cv.string,
-        vol.Optional("payload"): cv.string,
-    }
+_BUTTON_SCHEMA = vol.Any(
+    vol.Schema(
+        {
+            vol.Required("type"): vol.In(["callback", "message"]),
+            vol.Required("text"): cv.string,
+            vol.Optional("payload"): cv.string,
+        }
+    ),
+    vol.Schema(
+        {
+            vol.Required("type"): vol.In(["link"]),
+            vol.Required("text"): cv.string,
+            vol.Required("url"): cv.string,
+        }
+    ),
 )
 
 SERVICE_SEND_MESSAGE_SCHEMA = vol.Schema(

@@ -24,6 +24,7 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BUTTONS,
     CONF_BUTTON_PAYLOAD,
+    CONF_BUTTON_URL,
     CONF_BUTTON_ROW,
     CONF_BUTTON_TEXT,
     CONF_BUTTON_TO_EDIT,
@@ -379,10 +380,18 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:
             trans = {}
         type_labels = get_option_labels(
-            trans, "config", "add_button", "button_type", ["callback", "message"]
+            trans, "config", "add_button", "button_type", ["callback", "message", "link"]
         )
-        type_choice_labels = [type_labels.get("callback", "Callback"), type_labels.get("message", "Message")]
-        type_label_to_value = {type_labels.get("callback", "Callback"): "callback", type_labels.get("message", "Message"): "message"}
+        type_choice_labels = [
+            type_labels.get("callback", "Callback"),
+            type_labels.get("message", "Message"),
+            type_labels.get("link", "Link"),
+        ]
+        type_label_to_value = {
+            type_labels.get("callback", "Callback"): "callback",
+            type_labels.get("message", "Message"): "message",
+            type_labels.get("link", "Link"): "link",
+        }
 
         if user_input is not None:
             row_key = label_to_row_key.get(
@@ -393,12 +402,17 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             text = (user_input.get(CONF_BUTTON_TEXT) or "").strip()
             payload = (user_input.get(CONF_BUTTON_PAYLOAD) or "").strip()
+            btn_url = (user_input.get(CONF_BUTTON_URL) or "").strip()
             if not text:
                 errors["base"] = "invalid_button_text"
-            else:
+            elif btype == "link" and not btn_url:
+                errors["base"] = "invalid_button_url"
+            if not errors:
                 btn: dict[str, Any] = {"type": btype, "text": text}
                 if btype == "callback" and payload:
                     btn["payload"] = payload
+                if btype == "link":
+                    btn["url"] = btn_url
                 if row_key == "new" or not self._buttons_rows:
                     self._buttons_rows.append([btn])
                 else:
@@ -423,6 +437,7 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                     vol.Required(CONF_BUTTON_TEXT, default=""): str,
                     vol.Optional(CONF_BUTTON_PAYLOAD, default=""): str,
+                    vol.Optional(CONF_BUTTON_URL, default=""): str,
                 }
             ),
             description_placeholders={"buttons_list": buttons_display_str(self._buttons_rows) or "—"},
@@ -953,10 +968,18 @@ class MaxNotifyOptionsFlow(OptionsFlow):
         except Exception:
             trans = {}
         type_labels = get_option_labels(
-            trans, "options", "opt_add_button", "button_type", ["callback", "message"]
+            trans, "options", "opt_add_button", "button_type", ["callback", "message", "link"]
         )
-        type_choice_labels = [type_labels.get("callback", "Callback"), type_labels.get("message", "Message")]
-        type_label_to_value = {type_labels.get("callback", "Callback"): "callback", type_labels.get("message", "Message"): "message"}
+        type_choice_labels = [
+            type_labels.get("callback", "Callback"),
+            type_labels.get("message", "Message"),
+            type_labels.get("link", "Link"),
+        ]
+        type_label_to_value = {
+            type_labels.get("callback", "Callback"): "callback",
+            type_labels.get("message", "Message"): "message",
+            type_labels.get("link", "Link"): "link",
+        }
 
         if user_input is not None:
             row_key = label_to_row_key.get(
@@ -967,12 +990,17 @@ class MaxNotifyOptionsFlow(OptionsFlow):
             )
             text = (user_input.get(CONF_BUTTON_TEXT) or "").strip()
             payload = (user_input.get(CONF_BUTTON_PAYLOAD) or "").strip()
+            btn_url = (user_input.get(CONF_BUTTON_URL) or "").strip()
             if not text:
                 errors["base"] = "invalid_button_text"
-            else:
+            elif btype == "link" and not btn_url:
+                errors["base"] = "invalid_button_url"
+            if not errors:
                 btn: dict[str, Any] = {"type": btype, "text": text}
                 if btype == "callback" and payload:
                     btn["payload"] = payload
+                if btype == "link":
+                    btn["url"] = btn_url
                 if row_key == "new" or not self._opt_buttons:
                     self._opt_buttons.append([btn])
                 else:
@@ -997,6 +1025,7 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                     ),
                     vol.Required(CONF_BUTTON_TEXT, default=""): str,
                     vol.Optional(CONF_BUTTON_PAYLOAD, default=""): str,
+                    vol.Optional(CONF_BUTTON_URL, default=""): str,
                 }
             ),
             description_placeholders={"buttons_list": buttons_display_str(self._opt_buttons) or "—"},
@@ -1086,10 +1115,18 @@ class MaxNotifyOptionsFlow(OptionsFlow):
         except Exception:
             trans = {}
         type_labels = get_option_labels(
-            trans, "options", "opt_add_button", "button_type", ["callback", "message"]
+            trans, "options", "opt_add_button", "button_type", ["callback", "message", "link"]
         )
-        type_choice_labels = [type_labels.get("callback", "Callback"), type_labels.get("message", "Message")]
-        type_label_to_value = {type_labels.get("callback", "Callback"): "callback", type_labels.get("message", "Message"): "message"}
+        type_choice_labels = [
+            type_labels.get("callback", "Callback"),
+            type_labels.get("message", "Message"),
+            type_labels.get("link", "Link"),
+        ]
+        type_label_to_value = {
+            type_labels.get("callback", "Callback"): "callback",
+            type_labels.get("message", "Message"): "message",
+            type_labels.get("link", "Link"): "link",
+        }
 
         if user_input is not None:
             row_key = label_to_row_key.get(
@@ -1100,17 +1137,24 @@ class MaxNotifyOptionsFlow(OptionsFlow):
             )
             text = (user_input.get(CONF_BUTTON_TEXT) or "").strip()
             payload = (user_input.get(CONF_BUTTON_PAYLOAD) or "").strip()
+            btn_url = (user_input.get(CONF_BUTTON_URL) or "").strip()
             if not text:
                 errors["base"] = "invalid_button_text"
-            else:
+            elif btype == "link" and not btn_url:
+                errors["base"] = "invalid_button_url"
+            if not errors:
                 new_btn: dict[str, Any] = {"type": btype, "text": text}
                 if btype == "callback" and payload:
                     new_btn["payload"] = payload
+                if btype == "link":
+                    new_btn["url"] = btn_url
                 self._opt_buttons[ri][bi] = new_btn
                 self._opt_edit_index = None
                 return await self.async_step_buttons_menu(None)
         current_row_label = choice_labels[ri] if 0 <= ri < len(choice_labels) else choice_labels[0]
-        current_type_label = type_labels.get(btn.get("type", "callback"), "Callback")
+        bt_cur = str(btn.get("type", "callback")).strip().lower()
+        type_default_labels = {"callback": "Callback", "message": "Message", "link": "Link"}
+        current_type_label = type_labels.get(bt_cur, type_default_labels.get(bt_cur, "Callback"))
         return self.async_show_form(
             step_id="opt_edit_button_edit",
             data_schema=vol.Schema(
@@ -1123,6 +1167,7 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                     ),
                     vol.Required(CONF_BUTTON_TEXT, default=btn.get("text", "")): str,
                     vol.Optional(CONF_BUTTON_PAYLOAD, default=btn.get("payload", "")): str,
+                    vol.Optional(CONF_BUTTON_URL, default=btn.get("url", "")): str,
                 }
             ),
             description_placeholders={"buttons_list": buttons_display_str(self._opt_buttons) or "—"},

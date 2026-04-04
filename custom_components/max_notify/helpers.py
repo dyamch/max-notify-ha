@@ -65,7 +65,7 @@ def commands_display_str(commands: list[dict[str, str]] | None) -> str:
 
 
 def normalize_buttons(raw: list[Any] | None) -> list[list[dict[str, Any]]]:
-    """Normalize options buttons to list of rows, each row list of {type, text, payload?}."""
+    """Normalize options buttons to list of rows (callback, message, or link with url)."""
     if not raw or not isinstance(raw, list):
         return []
     result: list[list[dict[str, Any]]] = []
@@ -77,13 +77,19 @@ def normalize_buttons(raw: list[Any] | None) -> list[list[dict[str, Any]]]:
             if not isinstance(btn, dict):
                 continue
             t = (btn.get("type") or "callback").strip().lower()
-            if t not in ("callback", "message"):
+            if t not in ("callback", "message", "link"):
                 t = "callback"
             b: dict[str, Any] = {"type": t, "text": str(btn.get("text") or "").strip()}
-            if b["text"]:
-                if t == "callback" and btn.get("payload") is not None:
-                    b["payload"] = str(btn["payload"]).strip()
-                api_row.append(b)
+            if not b["text"]:
+                continue
+            if t == "callback" and btn.get("payload") is not None:
+                b["payload"] = str(btn["payload"]).strip()
+            elif t == "link":
+                url = str(btn.get("url") or "").strip()
+                if not url:
+                    continue
+                b["url"] = url
+            api_row.append(b)
         if api_row:
             result.append(api_row)
     return result
@@ -106,11 +112,16 @@ def normalize_service_buttons(raw: Any) -> list[list[dict[str, Any]]]:
         if not text:
             return None
         btype = str(item.get("type") or "callback").strip().lower()
-        if btype not in ("callback", "message"):
+        if btype not in ("callback", "message", "link"):
             btype = "callback"
         btn: dict[str, Any] = {"type": btype, "text": text}
         if btype == "callback" and item.get("payload") is not None:
             btn["payload"] = str(item["payload"]).strip()
+        elif btype == "link":
+            url = str(item.get("url") or "").strip()
+            if not url:
+                return None
+            btn["url"] = url
         return btn
 
     def _mapping_row_from_dict(item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -128,7 +139,7 @@ def normalize_service_buttons(raw: Any) -> list[list[dict[str, Any]]]:
     def _row_from_any(value: Any) -> list[dict[str, Any]]:
         # Row as mapping: {"Button": "payload", ...}
         if isinstance(value, dict):
-            if any(k in value for k in ("text", "type", "payload")):
+            if any(k in value for k in ("text", "type", "payload", "url")):
                 btn = _typed_button_from_dict(value)
                 return [btn] if btn else []
             return _mapping_row_from_dict(value)
@@ -139,7 +150,7 @@ def normalize_service_buttons(raw: Any) -> list[list[dict[str, Any]]]:
             for item in value:
                 if not isinstance(item, dict):
                     continue
-                if any(k in item for k in ("text", "type", "payload")):
+                if any(k in item for k in ("text", "type", "payload", "url")):
                     btn = _typed_button_from_dict(item)
                     if btn:
                         row.append(btn)
@@ -169,7 +180,7 @@ def normalize_service_buttons(raw: Any) -> list[list[dict[str, Any]]]:
 
         # New format: list of row-mappings -> many rows.
         if all(isinstance(item, dict) for item in raw) and all(
-            not any(k in item for k in ("text", "type", "payload"))
+            not any(k in item for k in ("text", "type", "payload", "url"))
             for item in raw
         ):
             rows: list[list[dict[str, Any]]] = []
@@ -226,7 +237,10 @@ def buttons_display_str(buttons: list[list[dict[str, Any]]] | None) -> str:
         for b in row:
             text = b.get("text") or ""
             payload = b.get("payload")
-            if payload:
+            url = b.get("url")
+            if b.get("type") == "link" and url:
+                parts.append(f"{text} → {url}")
+            elif payload:
                 parts.append(f"{text} ({payload})")
             else:
                 parts.append(text)
@@ -242,6 +256,12 @@ def buttons_choice_list(buttons: list[list[dict[str, Any]]] | None) -> list[tupl
         for bi, b in enumerate(row):
             text = b.get("text") or ""
             payload = b.get("payload")
-            label = f"{text} ({payload})" if payload else text
+            url = b.get("url")
+            if b.get("type") == "link" and url:
+                label = f"{text} → {url}"
+            elif payload:
+                label = f"{text} ({payload})"
+            else:
+                label = text
             choices.append((f"{ri}:{bi}", f"Row {ri + 1}: {label}"))
     return choices

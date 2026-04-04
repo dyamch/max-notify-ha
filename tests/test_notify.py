@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.max_notify.const import (
     API_BASE_URL_NOTIFY_A161,
@@ -45,6 +46,26 @@ class TestNormalizeButtonsForApi:
         buttons = [[{"type": "message", "text": "M", "payload": "p"}]]
         result = _normalize_buttons_for_api(buttons)
         assert "payload" not in result[0][0]
+
+    def test_link_with_https(self) -> None:
+        buttons = [[{"type": "link", "text": "Open", "url": "https://example.com/path"}]]
+        result = _normalize_buttons_for_api(buttons)
+        assert result[0][0] == {
+            "type": "link",
+            "text": "Open",
+            "url": "https://example.com/path",
+        }
+
+    def test_link_http_allowed(self) -> None:
+        buttons = [[{"type": "link", "text": "H", "url": "http://a.example/"}]]
+        result = _normalize_buttons_for_api(buttons)
+        assert result[0][0]["url"] == "http://a.example/"
+
+    def test_link_non_http_raises(self) -> None:
+        buttons = [[{"type": "link", "text": "Bad", "url": "homeassistant://hassio/ingress"}]]
+        with pytest.raises(ServiceValidationError) as exc:
+            _normalize_buttons_for_api(buttons)
+        assert exc.value.translation_key == "link_button_url_http_https_only"
 
 
 class TestExtractMessageIdFromResponse:

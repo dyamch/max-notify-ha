@@ -39,7 +39,7 @@
         },
         "buttons": {
           "name": "Кнопки",
-          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload) или список объектов (text, payload). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
+          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload), список {text, payload} или ряды {type: callback|message|link, text, payload?|url}. Для link только URL http(s). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
         },
         "notify": {
           "name": "Уведомлять",
@@ -92,7 +92,7 @@
         },
         "buttons": {
           "name": "Кнопки",
-          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload) или список объектов (text, payload). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
+          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload), список {text, payload} или ряды {type: callback|message|link, text, payload?|url}. Для link только URL http(s). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
         },
         "notify": {
           "name": "Уведомлять",
@@ -145,7 +145,7 @@
         },
         "buttons": {
           "name": "Кнопки",
-          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload) или список объектов (text, payload). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
+          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload), список {text, payload} или ряды {type: callback|message|link, text, payload?|url}. Для link только URL http(s). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
         },
         "notify": {
           "name": "Уведомлять",
@@ -198,7 +198,7 @@
         },
         "buttons": {
           "name": "Кнопки",
-          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload) или список объектов (text, payload). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
+          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload), список {text, payload} или ряды {type: callback|message|link, text, payload?|url}. Для link только URL http(s). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
         },
         "notify": {
           "name": "Уведомлять",
@@ -257,7 +257,7 @@
         },
         "buttons": {
           "name": "Кнопки",
-          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload), список объектов (text, payload) или список рядов. Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
+          "description": "Пользовательские inline-кнопки. Форматы: словарь (подпись → payload), список {text, payload}, ряды {type: callback|message|link, text, payload?|url} или список рядов. Для link только URL http(s). Сочетание со стандартной клавиатурой задаётся переключателем «Отправлять клавиатуру»."
         },
         "remove_buttons": {
           "name": "Удалить кнопки",
@@ -300,6 +300,7 @@
   "unsupported_for_notify_a161": "Операция {operation} не поддерживается в режиме notify.a161.ru.",
   "a161_video_too_large": "Для notify.a161.ru максимальный размер видео — {max_mib} МБ; этот файл — около {size_mib} МБ.",
   "a161_media_too_large": "Для notify.a161.ru максимальный размер фото и документов — {max_mib} МБ; этот файл — около {size_mib} МБ.",
+  "link_button_url_http_https_only": "URL кнопки-ссылки должен быть только http или https (получено: {url}).",
   "exceptions": {
     "invalid_notify_entity": {
       "message": "Недопустимая сущность Max Notify: {entity_id}"
@@ -330,6 +331,9 @@
     },
     "a161_media_too_large": {
       "message": "Для notify.a161.ru максимальный размер фото и документов — {max_mib} МБ; этот файл — около {size_mib} МБ."
+    },
+    "link_button_url_http_https_only": {
+      "message": "URL кнопки-ссылки должен быть только http или https (получено: {url})."
     }
   },
   "config": {
@@ -435,23 +439,26 @@
       },
       "add_button": {
         "title": "Добавить кнопку",
-        "description": "Тип, подпись и (для callback) payload. Текущие: {buttons_list}",
+        "description": "Тип, подпись, для callback — payload, для link — URL http(s). Текущие: {buttons_list}",
         "data": {
           "button_row": "Ряд",
           "button_type": "Тип",
           "button_text": "Подпись на кнопке",
-          "button_payload": "Payload (только callback)"
+          "button_payload": "Payload (только callback)",
+          "button_url": "URL (только link)"
         },
         "data_description": {
           "button_row": "Ряд для добавления кнопки",
-          "button_type": "callback или message",
+          "button_type": "callback, message или link (открывает сайт)",
           "button_text": "Текст на кнопке",
-          "button_payload": "Для кнопок callback: это значение приходит в событии max_notify_received в поле callback_data. Используйте его в триггерах автоматизаций для идентификации кнопки (например: light_on, light_off, scene_kitchen)."
+          "button_payload": "Для кнопок callback: это значение приходит в событии max_notify_received в поле callback_data. Используйте его в триггерах автоматизаций для идентификации кнопки (например: light_on, light_off, scene_kitchen).",
+          "button_url": "Для link: только адрес с http:// или https://"
         },
         "options": {
           "button_type": {
             "callback": "Callback",
-            "message": "Сообщение"
+            "message": "Сообщение",
+            "link": "Ссылка"
           }
         },
         "menu_options": {
@@ -510,7 +517,8 @@
       "invalid_id_format": "Введите целое число (положительное — личный чат, отрицательное — группа).",
       "notify_user_only": "Для notify.a161.ru используйте только положительные ID получателя (user_id).",
       "invalid_command_name": "Введите имя команды (без слэша).",
-      "invalid_button_text": "Введите подпись на кнопке."
+      "invalid_button_text": "Введите подпись на кнопке.",
+      "invalid_button_url": "Для кнопки-ссылки укажите URL с http:// или https://."
     },
     "abort": {
       "already_configured": "Эта конфигурация уже добавлена",
@@ -581,23 +589,26 @@
       },
       "opt_add_button": {
         "title": "Добавить кнопку",
-        "description": "Тип, подпись и (для callback) payload. Текущие: {buttons_list}",
+        "description": "Тип, подпись, для callback — payload, для link — URL http(s). Текущие: {buttons_list}",
         "data": {
           "button_row": "Ряд",
           "button_type": "Тип",
           "button_text": "Подпись на кнопке",
-          "button_payload": "Payload (только callback)"
+          "button_payload": "Payload (только callback)",
+          "button_url": "URL (только link)"
         },
         "data_description": {
           "button_row": "Ряд для добавления кнопки",
-          "button_type": "callback или message",
+          "button_type": "callback, message или link (открывает сайт)",
           "button_text": "Текст на кнопке",
-          "button_payload": "Для кнопок callback: это значение приходит в событии max_notify_received в поле callback_data. Используйте его в триггерах автоматизаций для идентификации кнопки (например: light_on, light_off, scene_kitchen)."
+          "button_payload": "Для кнопок callback: это значение приходит в событии max_notify_received в поле callback_data. Используйте его в триггерах автоматизаций для идентификации кнопки (например: light_on, light_off, scene_kitchen).",
+          "button_url": "Для link: только адрес с http:// или https://"
         },
         "options": {
           "button_type": {
             "callback": "Callback",
-            "message": "Сообщение"
+            "message": "Сообщение",
+            "link": "Ссылка"
           }
         },
         "menu_options": {
@@ -626,18 +637,27 @@
       },
       "opt_edit_button_edit": {
         "title": "Редактировать кнопку",
-        "description": "Измените ряд, тип, подпись или payload. Текущие: {buttons_list}",
+        "description": "Измените ряд, тип, подпись, payload или URL ссылки. Текущие: {buttons_list}",
         "data": {
           "button_row": "Ряд",
           "button_type": "Тип",
           "button_text": "Подпись на кнопке",
-          "button_payload": "Payload (только callback)"
+          "button_payload": "Payload (только callback)",
+          "button_url": "URL (только link)"
         },
         "data_description": {
           "button_row": "Ряд для размещения кнопки",
-          "button_type": "callback или message",
+          "button_type": "callback, message или link (открывает сайт)",
           "button_text": "Текст на кнопке",
-          "button_payload": "Для кнопок callback: это значение приходит в событии max_notify_received в поле callback_data. Используйте его в триггерах автоматизаций для идентификации кнопки (например: light_on, light_off, scene_kitchen)."
+          "button_payload": "Для кнопок callback: это значение приходит в событии max_notify_received в поле callback_data. Используйте его в триггерах автоматизаций для идентификации кнопки (например: light_on, light_off, scene_kitchen).",
+          "button_url": "Для link: только адрес с http:// или https://"
+        },
+        "options": {
+          "button_type": {
+            "callback": "Callback",
+            "message": "Сообщение",
+            "link": "Ссылка"
+          }
         }
       },
       "opt_remove_button": {

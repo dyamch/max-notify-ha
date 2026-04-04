@@ -485,6 +485,14 @@ async def edit_message(
         return False
 
 
+def _max_api_link_url_is_http_https(url: str) -> bool:
+    """Max API accepts only http(s) URLs in link buttons."""
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return bool(parsed.netloc)
+
+
 def _message_id_candidates(message_id: str) -> str | None:
     """Normalize message_id to `mid.*` format, or return None."""
     raw = str(message_id).strip()
@@ -496,16 +504,30 @@ def _message_id_candidates(message_id: str) -> str | None:
 
 
 def _normalize_buttons_for_api(buttons: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
-    """Convert service buttons to Max API format (type, text, payload for callback)."""
+    """Convert service buttons to Max API format (callback/message/link)."""
     out: list[list[dict[str, Any]]] = []
     for row in buttons:
         api_row: list[dict[str, Any]] = []
         for btn in row:
             if not isinstance(btn, dict):
                 continue
-            b = {"type": btn.get("type", "callback"), "text": str(btn.get("text", ""))}
-            if b["type"] == "callback" and btn.get("payload") is not None:
+            btype = str(btn.get("type", "callback")).strip().lower()
+            if btype not in ("callback", "message", "link"):
+                btype = "callback"
+            b: dict[str, Any] = {"type": btype, "text": str(btn.get("text", ""))}
+            if btype == "callback" and btn.get("payload") is not None:
                 b["payload"] = str(btn["payload"])
+            elif btype == "link":
+                url = str(btn.get("url", "")).strip()
+                if not _max_api_link_url_is_http_https(url):
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="link_button_url_http_https_only",
+                        translation_placeholders={
+                            "url": url[:200] if url else "(empty)",
+                        },
+                    )
+                b["url"] = url
             api_row.append(b)
         if api_row:
             out.append(api_row)
