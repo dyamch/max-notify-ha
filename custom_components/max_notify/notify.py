@@ -39,7 +39,6 @@ from .const import (
     FILE_READY_RETRY_DELAYS,
     MAX_MESSAGE_LENGTH,
     NOTIFY_A161_MAX_UPLOAD_BYTES,
-    NOTIFY_A161_MAX_VIDEO_UPLOAD_BYTES,
     UPLOAD_VIDEO_TIMEOUT,
     VIDEO_PROCESSING_DELAY,
     VIDEO_READY_RETRY_DELAYS,
@@ -1184,12 +1183,12 @@ async def upload_video_and_send(
         _LOGGER.error("Video data is empty")
         return
 
-    if _is_notify_a161_entry(entry) and len(body) > NOTIFY_A161_MAX_VIDEO_UPLOAD_BYTES:
+    if _is_notify_a161_entry(entry) and len(body) > NOTIFY_A161_MAX_UPLOAD_BYTES:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="a161_video_too_large",
             translation_placeholders={
-                "max_mib": str(NOTIFY_A161_MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)),
+                "max_mib": str(NOTIFY_A161_MAX_UPLOAD_BYTES // (1024 * 1024)),
                 "size_mib": f"{len(body) / (1024 * 1024):.2f}",
             },
         )
