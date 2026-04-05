@@ -87,6 +87,8 @@ CHATS_PAGE_SIZE = 100
 # notify.a161.ru: лимиты на стороне сервиса (проверка перед загрузкой)
 # notify.a161.ru: единый лимит размера файла до загрузки (фото, документы, видео)
 NOTIFY_A161_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# notify.a161.ru: минимум между успешными исходящими сообщениями (снижает заливку API при серии вызовов)
+NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS = 1.0
 
 FILE_UPLOAD_DELAY = 1.5
 FILE_READY_RETRY_DELAYS = (3, 5, 8)

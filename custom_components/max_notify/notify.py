@@ -7,7 +7,8 @@ import json
 import logging
 import mimetypes
 import os
-from typing import Any, Callable
+import time
+from typing import Any, Awaitable, Callable
 from urllib.parse import unquote, urlparse
 
 import aiohttp
@@ -39,6 +40,7 @@ from .const import (
     FILE_READY_RETRY_DELAYS,
     MAX_MESSAGE_LENGTH,
     NOTIFY_A161_MAX_UPLOAD_BYTES,
+    NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS,
     UPLOAD_VIDEO_TIMEOUT,
     VIDEO_PROCESSING_DELAY,
     VIDEO_READY_RETRY_DELAYS,
@@ -75,6 +77,37 @@ def _api_base_url_for_entry(entry: ConfigEntry) -> str:
     if _is_notify_a161_entry(entry):
         return API_BASE_URL_NOTIFY_A161
     return API_BASE_URL
+
+
+def _get_a161_pace_lock(hass: HomeAssistant, entry: ConfigEntry) -> asyncio.Lock:
+    """One lock per config entry: serialize outgoing a161 sends and pace interval."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    locks: dict[str, asyncio.Lock] = domain_data.setdefault("_a161_send_pace_locks", {})
+    return locks.setdefault(entry.entry_id, asyncio.Lock())
+
+
+async def _notify_a161_with_pace_lock(
+    hass: HomeAssistant,
+    entry: ConfigEntry | None,
+    run: Callable[[], Awaitable[bool]],
+) -> bool:
+    """Wait at least NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS after last successful send; then run()."""
+    if entry is None or not _is_notify_a161_entry(entry):
+        return await run()
+    async with _get_a161_pace_lock(hass, entry):
+        domain_data = hass.data.setdefault(DOMAIN, {})
+        last_map: dict[str, float] = domain_data.setdefault("_a161_send_last_mono", {})
+        last = last_map.get(entry.entry_id)
+        now = time.monotonic()
+        if isinstance(last, (int, float)):
+            gap = NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS
+            elapsed = now - last
+            if elapsed < gap:
+                await asyncio.sleep(gap - elapsed)
+        ok = await run()
+        if ok:
+            last_map[entry.entry_id] = time.monotonic()
+        return ok
 
 
 def _content_type_from_path(path: str) -> str:
@@ -320,6 +353,8 @@ async def _get_message_url_and_recipient(
 
 
 async def _post_message_with_retry(
+    hass: HomeAssistant,
+    entry: ConfigEntry | None,
     session: aiohttp.ClientSession,
     url: str,
     headers: dict[str, str],
@@ -329,51 +364,53 @@ async def _post_message_with_retry(
     count_requests: int | None = None,
     on_success: Callable[[str], None] | None = None,
 ) -> bool:
-    last_error: str | None = None
-    if count_requests is None:
-        count_requests = len(retry_delays) + 1
-    for attempt in range(count_requests):
-        try:
-            async with session.post(
-                url,
-                json=payload,
-                headers={**headers, "Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                body = await resp.text()
-                if resp.status < 400:
-                    if on_success is not None:
-                        on_success(body)
-                    _LOGGER.info("%s sent successfully (status=%s)", log_label, resp.status)
-                    return True
-                if resp.status == 400 and "attachment.not.ready" in body:
-                    last_error = body
-                    if attempt < count_requests - 1:
-                        delay = (
-                            retry_delays[attempt]
-                            if attempt < len(retry_delays)
-                            else retry_delays[-1]
-                        )
-                        _LOGGER.debug("%s not ready, retry in %ss (attempt %s)", log_label, delay, attempt + 2)
-                        await asyncio.sleep(delay)
-                        continue
-                _LOGGER.error("Max API send %s failed: status=%s body=%s", log_label, resp.status, body[:500])
-                if resp.status == 400 and "attachment.not.ready" in body:
-                    if log_label in ("Video", "notify_a161_video"):
-                        _LOGGER.error(
-                            "Max is still processing the video; increase `count_requests` on send_video for large files."
-                        )
-                    elif log_label == "notify_a161_media":
-                        _LOGGER.error(
-                            "Max is still processing the attachment; increase `count_requests` on send_photo or send_document for large files."
-                        )
+    async def _inner() -> bool:
+        last_error: str | None = None
+        n = len(retry_delays) + 1 if count_requests is None else count_requests
+        for attempt in range(n):
+            try:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers={**headers, "Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    body = await resp.text()
+                    if resp.status < 400:
+                        if on_success is not None:
+                            on_success(body)
+                        _LOGGER.info("%s sent successfully (status=%s)", log_label, resp.status)
+                        return True
+                    if resp.status == 400 and "attachment.not.ready" in body:
+                        last_error = body
+                        if attempt < n - 1:
+                            delay = (
+                                retry_delays[attempt]
+                                if attempt < len(retry_delays)
+                                else retry_delays[-1]
+                            )
+                            _LOGGER.debug("%s not ready, retry in %ss (attempt %s)", log_label, delay, attempt + 2)
+                            await asyncio.sleep(delay)
+                            continue
+                    _LOGGER.error("Max API send %s failed: status=%s body=%s", log_label, resp.status, body[:500])
+                    if resp.status == 400 and "attachment.not.ready" in body:
+                        if log_label in ("Video", "notify_a161_video"):
+                            _LOGGER.error(
+                                "Max is still processing the video; increase `count_requests` on send_video for large files."
+                            )
+                        elif log_label == "notify_a161_media":
+                            _LOGGER.error(
+                                "Max is still processing the attachment; increase `count_requests` on send_photo or send_document for large files."
+                            )
+                    return False
+            except aiohttp.ClientError as e:
+                _LOGGER.error("Max API send %s request failed: %s", log_label, e)
                 return False
-        except aiohttp.ClientError as e:
-            _LOGGER.error("Max API send %s request failed: %s", log_label, e)
-            return False
-    if last_error:
-        _LOGGER.error("Max API send %s failed after retries: %s", log_label, last_error[:300])
-    return False
+        if last_error:
+            _LOGGER.error("Max API send %s failed after retries: %s", log_label, last_error[:300])
+        return False
+
+    return await _notify_a161_with_pace_lock(hass, entry, _inner)
 
 
 async def delete_message(
@@ -463,26 +500,30 @@ async def edit_message(
         url = f"{base}{API_PATH_MESSAGES}?message_id={mid}&v={API_VERSION}"
 
     session = async_get_clientsession(hass)
-    try:
-        async with session.put(
-            url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
-        ) as resp:
-            body = await resp.text()
-            _LOGGER.info(
-                "edit_message HTTP response: status=%s body=%s", resp.status, body
-            )
-            if resp.status < 400:
-                _LOGGER.info("Message %s edited successfully", mid)
-                return True
-            _LOGGER.error(
-                "Max API edit message failed: status=%s body=%s",
-                resp.status,
-                body,
-            )
+
+    async def _put() -> bool:
+        try:
+            async with session.put(
+                url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                body = await resp.text()
+                _LOGGER.info(
+                    "edit_message HTTP response: status=%s body=%s", resp.status, body
+                )
+                if resp.status < 400:
+                    _LOGGER.info("Message %s edited successfully", mid)
+                    return True
+                _LOGGER.error(
+                    "Max API edit message failed: status=%s body=%s",
+                    resp.status,
+                    body,
+                )
+                return False
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Max API edit message request failed: %s", e)
             return False
-    except aiohttp.ClientError as e:
-        _LOGGER.error("Max API edit message request failed: %s", e)
-        return False
+
+    return await _notify_a161_with_pace_lock(hass, entry, _put)
 
 
 def _max_api_link_url_is_http_https(url: str) -> bool:
@@ -713,6 +754,8 @@ async def send_message_with_buttons(
         )
 
     await _post_message_with_retry(
+        hass,
+        entry,
         session,
         msg_url,
         headers,
@@ -781,6 +824,8 @@ async def send_plain_message(
         )
 
     await _post_message_with_retry(
+        hass,
+        entry,
         session,
         msg_url,
         headers,
@@ -925,6 +970,8 @@ async def upload_image_and_send(
             )
 
         await _post_message_with_retry(
+            hass,
+            entry,
             session,
             msg_url,
             headers,
@@ -1059,6 +1106,8 @@ async def upload_image_and_send(
         )
 
     await _post_message_with_retry(
+        hass,
+        entry,
         session,
         msg_url,
         headers,
@@ -1260,6 +1309,8 @@ async def upload_video_and_send(
             )
 
         await _post_message_with_retry(
+            hass,
+            entry,
             session,
             msg_url,
             headers,
@@ -1295,6 +1346,8 @@ async def upload_video_and_send(
         )
 
     await _post_message_with_retry(
+        hass,
+        entry,
         session,
         msg_url,
         headers,
@@ -1428,7 +1481,6 @@ class MaxNotifyEntity(NotifyEntity):
         headers = {"Authorization": token, "Content-Type": "application/json"}
 
         session = async_get_clientsession(self.hass)
-        last_error: Exception | None = None
 
         _LOGGER.debug(
             "Starting Max send with retries: url=%s, payload_keys=%s, max_attempts=5",
@@ -1436,88 +1488,95 @@ class MaxNotifyEntity(NotifyEntity):
             list(payload.keys()),
         )
 
-        for attempt in range(1, 6):
-            _LOGGER.debug("Max send attempt %s/5: url=%s", attempt, url)
-            try:
-                async with session.post(
-                    url,
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    body = await resp.text()
-                    if resp.status >= 400:
-                        _LOGGER.error(
-                            "Max API send failed: status=%s body=%s request_url=%s",
-                            resp.status,
-                            body[:500],
-                            url,
-                        )
-                        if resp.status == 403 and "chatId" in body and "user_id=" in url:
-                            _LOGGER.info(
-                                "Подсказка: GET /chats не отдаёт диалоги (0 чатов), chat_id диалога через API недоступен. "
-                                "Используйте групповой чат: добавьте бота в группу в Max, получите chat_id через GET /chats "
-                                "и настройте интеграцию с типом «Групповой чат» и этим chat_id."
+        async def _send_attempts() -> bool:
+            last_error: Exception | None = None
+            for attempt in range(1, 6):
+                _LOGGER.debug("Max send attempt %s/5: url=%s", attempt, url)
+                try:
+                    async with session.post(
+                        url,
+                        json=payload,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as resp:
+                        body = await resp.text()
+                        if resp.status >= 400:
+                            _LOGGER.error(
+                                "Max API send failed: status=%s body=%s request_url=%s",
+                                resp.status,
+                                body[:500],
+                                url,
                             )
-                        return
-                    _LOGGER.info("Message sent successfully (status=%s)", resp.status)
-                    _LOGGER.info(
-                        "MaxNotifyEntity.async_send_message: full server response body=%s",
-                        body,
-                    )
-                    extracted_mid = _extract_message_id_from_response(body)
-                    if extracted_mid:
+                            if resp.status == 403 and "chatId" in body and "user_id=" in url:
+                                _LOGGER.info(
+                                    "Подсказка: GET /chats не отдаёт диалоги (0 чатов), chat_id диалога через API недоступен. "
+                                    "Используйте групповой чат: добавьте бота в группу в Max, получите chat_id через GET /chats "
+                                    "и настройте интеграцию с типом «Групповой чат» и этим chat_id."
+                                )
+                            return False
+                        _LOGGER.info("Message sent successfully (status=%s)", resp.status)
                         _LOGGER.info(
-                            "MaxNotifyEntity.async_send_message: extracted message_id=%s",
-                            extracted_mid,
+                            "MaxNotifyEntity.async_send_message: full server response body=%s",
+                            body,
                         )
-                    else:
-                        _LOGGER.info(
-                            "MaxNotifyEntity.async_send_message: message_id not found in response",
+                        extracted_mid = _extract_message_id_from_response(body)
+                        if extracted_mid:
+                            _LOGGER.info(
+                                "MaxNotifyEntity.async_send_message: extracted message_id=%s",
+                                extracted_mid,
+                            )
+                        else:
+                            _LOGGER.info(
+                                "MaxNotifyEntity.async_send_message: message_id not found in response",
+                            )
+                        _store_outgoing_message_id_from_response(
+                            self.hass,
+                            self._entry.entry_id,
+                            body,
+                            "MaxNotifyEntity.async_send_message",
                         )
-                    _store_outgoing_message_id_from_response(
-                        self.hass,
-                        self._entry.entry_id,
-                        body,
-                        "MaxNotifyEntity.async_send_message",
+                        _LOGGER.debug("Max send finished successfully on attempt %s/5", attempt)
+                        return True
+                except aiohttp.ClientError as e:
+                    last_error = e
+                    _LOGGER.error(
+                        "Max API request failed (attempt %s/5): %s",
+                        attempt,
+                        e,
                     )
-                    _LOGGER.debug("Max send finished successfully on attempt %s/5", attempt)
-                    return
-            except aiohttp.ClientError as e:
-                last_error = e
-                _LOGGER.error(
-                    "Max API request failed (attempt %s/5): %s",
-                    attempt,
-                    e,
-                )
-                if attempt < 5:
-                    delay = 2 ** (attempt - 1)
-                    _LOGGER.debug("Scheduling next Max send retry in %ss (attempt %s/5)", delay, attempt + 1)
-                    await asyncio.sleep(delay)
-            except Exception as e:
-                last_error = e
-                _LOGGER.exception("Unexpected error sending Max message: %s", e)
-                break
+                    if attempt < 5:
+                        delay = 2 ** (attempt - 1)
+                        _LOGGER.debug("Scheduling next Max send retry in %ss (attempt %s/5)", delay, attempt + 1)
+                        await asyncio.sleep(delay)
+                except Exception as e:
+                    last_error = e
+                    _LOGGER.exception("Unexpected error sending Max message: %s", e)
+                    break
 
-        # Если все 5 попыток не удались, отправляем системное уведомление в HA
-        _LOGGER.error(
-            "Max message send failed after 5 attempts: last_error=%r, url=%s, entry_id=%s",
-            last_error,
-            url,
-            self._entry.entry_id,
-        )
-        message = (
-            f"Не удалось отправить сообщение через Max после 5 попыток.\n"
-            f"Ошибка: {last_error!r}\n"
-            f"URL: {url}"
-        )
-        await self.hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Max Notify: ошибка отправки сообщения",
-                "message": message,
-                "notification_id": f"max_notify_send_error_{self._entry.entry_id}",
-            },
-            blocking=False,
-        )
+            _LOGGER.error(
+                "Max message send failed after 5 attempts: last_error=%r, url=%s, entry_id=%s",
+                last_error,
+                url,
+                self._entry.entry_id,
+            )
+            message = (
+                f"Не удалось отправить сообщение через Max после 5 попыток.\n"
+                f"Ошибка: {last_error!r}\n"
+                f"URL: {url}"
+            )
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Max Notify: ошибка отправки сообщения",
+                    "message": message,
+                    "notification_id": f"max_notify_send_error_{self._entry.entry_id}",
+                },
+                blocking=False,
+            )
+            return False
+
+        if _is_notify_a161_entry(self._entry):
+            await _notify_a161_with_pace_lock(self.hass, self._entry, _send_attempts)
+        else:
+            await _send_attempts()
