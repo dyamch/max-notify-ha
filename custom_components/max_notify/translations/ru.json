@@ -340,7 +340,7 @@
     "receive_mode_title": {
       "send_only": "отправка",
       "polling": "Long Polling",
-      "webhook": "Webhook"
+      "webhook": "WebHook"
     },
     "step": {
       "integration_type": {
@@ -391,7 +391,7 @@
       },
       "user": {
         "title": "Max Notify: токен бота",
-        "description": "Введите токен доступа бота, формат сообщений и режим приёма. При «Только отправка» дополнительные поля не нужны.",
+        "description": "Введите токен доступа бота, формат сообщений и режим приёма. При «Только отправка» дополнительные поля не нужны.\n\nЧтобы режим WebHook стал доступен в списке выбора, настройте внешний HTTPS-URL Home Assistant (Настройки → Система → Сеть). См. https://www.home-assistant.io/docs/configuration/basic/\n\nПока в Max активна подписка WebHook, Long Polling недоступен, и наоборот — см. https://dev.max.ru/docs-api/methods/POST/subscriptions",
         "data": {
           "access_token": "Токен доступа",
           "message_format": "Формат сообщений",
@@ -400,7 +400,11 @@
         "data_description": {
           "access_token": "Токен бота из раздела «Для разработчиков» в MAX.",
           "message_format": "Текст, Markdown или HTML (параметр format в API).",
-          "receive_mode": "Только отправка — без приёма; Long Polling или Webhook — приём команд и нажатий кнопок."
+          "receive_mode": "{receive_mode_hint}"
+        },
+        "hints": {
+          "receive_mode_with_https": "Только отправка — без приёма. Long Polling — приём без отдельного публичного URL. WebHook — через HTTPS Home Assistant (Настройки → Система → Сеть). По API Max для одного бота не могут одновременно работать Long Polling и WebHook. В настройках интеграции: пока выбран WebHook, в списке скрыт Long Polling; пока выбран Long Polling — скрыт WebHook. Чтобы сменить режим приёма, сначала переключитесь на «Только отправка».",
+          "receive_mode_no_https": "Только отправка — без приёма. Long Polling — приём команд и нажатий кнопок без публичного HTTPS."
         },
         "options": {
           "message_format": {
@@ -411,15 +415,15 @@
           "receive_mode": {
             "send_only": "Только отправка",
             "polling": "Long Polling",
-            "webhook": "Webhook"
+            "webhook": "WebHook"
           }
         }
       },
-      "receive_options": {
-        "title": "Настройки приёма",
-        "description": "Режим: {receive_mode}. Укажите секрет webhook при необходимости. Далее можно добавить или удалить кнопки клавиатуры.",
+      "webhook_secret": {
+        "title": "Секрет WebHook",
+        "description": "Режим: {receive_mode}. Укажите секрет WebHook при необходимости. Для WebHook в Home Assistant должен быть настроен внешний URL по HTTPS (Настройки → Система → Сеть). См. https://www.home-assistant.io/docs/configuration/basic/ Далее можно добавить или удалить кнопки клавиатуры.",
         "data": {
-          "webhook_secret": "Секрет webhook (необязательно)"
+          "webhook_secret": "Секрет WebHook (необязательно)"
         },
         "data_description": {
           "webhook_secret": "5–256 символов; Max пришлёт в заголовке X-Max-Bot-Api-Secret."
@@ -427,7 +431,9 @@
       },
       "receive_options_menu": {
         "title": "Кнопки клавиатуры",
-        "description": "Текущие кнопки: {buttons_list}. Выберите действие и нажмите «Отправить».",
+        "intro_no_buttons": "Кнопки ещё не настроены. ",
+        "intro_with_buttons": "Текущие кнопки: {buttons_list}. ",
+        "description": "{buttons_intro}Выберите действие и нажмите «Отправить».",
         "data": {
           "action": "Действие"
         },
@@ -513,6 +519,11 @@
       "invalid_notify_token_length": "Токен notify.a161.ru должен содержать 36 символов.",
       "invalid_auth": "Неверный токен. Проверьте токен в разделе Интеграция платформы MAX.",
       "cannot_connect": "Не удалось подключиться к API Max. Проверьте сеть и повторите.",
+      "polling_subscription_list_failed": "Не удалось получить список WebHook-подписок в Max API. Проверьте сеть и повторите.",
+      "polling_webhook_subscriptions_remain": "Long Polling недоступен, пока для бота активна подписка WebHook в Max. Удалите подписки WebHook (или выберите «Только отправка» / WebHook в настройках) и повторите. См. https://dev.max.ru/docs-api/methods/POST/subscriptions",
+      "polling_blocked_by_webhook_other_entry": "Другая интеграция Max Notify уже использует WebHook с этим токеном бота. Сначала отключите WebHook там или используйте другой токен.",
+      "webhook_blocked_by_polling_other_entry": "Другая интеграция Max Notify уже использует Long Polling с этим токеном бота. Сначала отключите Long Polling там или используйте другой токен.",
+      "webhook_requires_external_https_url": "Для WebHook нужен внешний HTTPS-адрес Home Assistant (Настройки → Система → Сеть или Nabu Casa). Сначала настройте URL, затем снова выберите WebHook.",
       "unknown": "Произошла неизвестная ошибка",
       "invalid_id_format": "Введите целое число (положительное — личный чат, отрицательное — группа).",
       "notify_user_only": "Для notify.a161.ru используйте только положительные ID получателя (user_id).",
@@ -529,13 +540,11 @@
     "step": {
       "init_notify": {
         "title": "Настройки notify.a161.ru",
-        "description": "Токен (оставьте пустым, чтобы не менять) и формат сообщений. Изменения применяются при отправке формы. user_id задаётся только при первой настройке.",
+        "description": "Только формат сообщений. Чтобы сменить API-ключ, удалите интеграцию и добавьте заново. user_id задаётся только при первой настройке.",
         "data": {
-          "access_token": "Новый API-ключ (необязательно)",
           "message_format": "Формат сообщений"
         },
         "data_description": {
-          "access_token": "Оставьте пустым, чтобы не менять токен",
           "message_format": "Текст, Markdown или HTML"
         },
         "options": {
@@ -548,18 +557,23 @@
       },
       "init": {
         "title": "Настройки Max Notify",
-        "description": "Токен (оставьте пустым, чтобы не менять), формат сообщений и режим приёма. При Webhook URL: {webhook_url}. При Polling/Webhook на следующем шаге можно добавлять, редактировать и удалять кнопки клавиатуры (как при добавлении чатов).",
+        "description": "Токен (необязательно), формат сообщений, режим приёма.{webhook_url_paragraph}",
+        "webhook_url_paragraph": "URL WebHook в Max: {webhook_url}.",
         "data": {
           "access_token": "Новый API-ключ (необязательно)",
           "message_format": "Формат сообщений",
-          "receive_mode": "Режим приёма",
-          "webhook_secret": "Секрет webhook (необязательно)"
+          "receive_mode": "Режим приёма"
         },
         "data_description": {
           "access_token": "Оставьте пустым, чтобы не менять токен",
           "message_format": "Текст, Markdown или HTML",
-          "receive_mode": "Только отправка, Long Polling или Webhook",
-          "webhook_secret": "5–256 символов; Max пришлёт в заголовке X-Max-Bot-Api-Secret"
+          "receive_mode": "{receive_mode_hint}"
+        },
+        "hints": {
+          "receive_mode_send_only": "Только исходящие сообщения. Для приёма команд и кнопок выберите Long Polling или WebHook (для одного бота в Max — один режим приёма).",
+          "receive_mode_polling_https": "Long Polling работает без отдельного публичного URL. WebHook доступен, так как у Home Assistant есть HTTPS — выберите один режим; если в этой интеграции включён WebHook, Long Polling здесь скрыт, пока не переключитесь на «Только отправка» (снимается регистрация WebHook).",
+          "receive_mode_polling_no_https": "Long Polling работает без внешнего HTTPS. Пункт «WebHook» появится после настройки внешнего URL Home Assistant. WebHook и Long Polling не могут быть активны одновременно в Max для одного бота.",
+          "receive_mode_webhook_active": "Активен WebHook; Long Polling не показывается, пока не переключитесь на «Только отправка» (снимается регистрация WebHook). Выше — URL, зарегистрированный в Max."
         },
         "options": {
           "message_format": {
@@ -570,13 +584,25 @@
           "receive_mode": {
             "send_only": "Только отправка",
             "polling": "Long Polling",
-            "webhook": "Webhook"
+            "webhook": "WebHook"
           }
+        }
+      },
+      "webhook_secret": {
+        "title": "Секрет WebHook",
+        "description": "URL WebHook в Max: {webhook_url}.\n\nНеобязательный секрет для заголовка X-Max-Bot-Api-Secret.",
+        "data": {
+          "webhook_secret": "Секрет WebHook (необязательно)"
+        },
+        "data_description": {
+          "webhook_secret": "5–256 символов; Max пришлёт в заголовке X-Max-Bot-Api-Secret"
         }
       },
       "buttons_menu": {
         "title": "Кнопки клавиатуры",
-        "description": "Текущие кнопки: {buttons_list}. Добавляйте, редактируйте или удаляйте кнопки, затем нажмите «Завершить».",
+        "intro_no_buttons": "Кнопки ещё не настроены. ",
+        "intro_with_buttons": "Текущие кнопки: {buttons_list}. ",
+        "description": "{buttons_intro}Добавляйте, редактируйте или удаляйте кнопки, затем нажмите «Завершить».",
         "data": {
           "action": "Действие"
         },
@@ -670,6 +696,19 @@
           "button_to_remove": ""
         }
       }
+    },
+    "error": {
+      "polling_subscription_list_failed": "Не удалось получить список WebHook-подписок в Max API. Проверьте сеть и повторите.",
+      "polling_webhook_subscriptions_remain": "Long Polling недоступен, пока для бота активна подписка WebHook в Max. Удалите подписки WebHook (или выберите «Только отправка» / WebHook в настройках) и повторите. См. https://dev.max.ru/docs-api/methods/POST/subscriptions",
+      "polling_blocked_by_webhook_other_entry": "Другая интеграция Max Notify уже использует WebHook с этим токеном бота. Сначала отключите WebHook там или используйте другой токен.",
+      "webhook_blocked_by_polling_other_entry": "Другая интеграция Max Notify уже использует Long Polling с этим токеном бота. Сначала отключите Long Polling там или используйте другой токен.",
+      "webhook_requires_external_https_url": "Для WebHook нужен внешний HTTPS-адрес Home Assistant (Настройки → Система → Сеть или Nabu Casa). Сначала настройте URL, затем снова выберите WebHook."
+    }
+  },
+  "issues": {
+    "webhook_disabled_no_https": {
+      "title": "Max Notify: WebHook отключён (нет HTTPS)",
+      "description": "Интеграция {entry_title} была в режиме WebHook, но у Home Assistant нет внешнего HTTPS base URL. Режим сменён на «Только отправка». Настройте Настройки → Система → Сеть (или Nabu Casa), затем при необходимости снова выберите WebHook в настройках интеграции."
     }
   },
   "config_subentries": {

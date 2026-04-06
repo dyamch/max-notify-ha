@@ -6,11 +6,104 @@ from typing import Any
 
 import logging
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_BUTTONS
+from .const import (
+    CONF_ACCESS_TOKEN,
+    CONF_BUTTONS,
+    CONF_INTEGRATION_TYPE,
+    CONF_RECEIVE_MODE,
+    DOMAIN,
+    INTEGRATION_TYPE_OFFICIAL,
+    RECEIVE_MODE_POLLING,
+    RECEIVE_MODE_SEND_ONLY,
+    RECEIVE_MODE_WEBHOOK,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def normalize_access_token(token: str | None) -> str:
+    """Strip whitespace for comparisons (HA forms may differ in trailing spaces)."""
+    if token is None:
+        return ""
+    return str(token).strip()
+
+
+def same_official_token_entries(hass: HomeAssistant, token: str) -> list[ConfigEntry]:
+    """Config entries that use official Max API with this access token."""
+    token = normalize_access_token(token)
+    if not token:
+        return []
+    out: list[ConfigEntry] = []
+    for e in hass.config_entries.async_entries(DOMAIN):
+        if e.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL) != INTEGRATION_TYPE_OFFICIAL:
+            continue
+        if normalize_access_token(e.data.get(CONF_ACCESS_TOKEN)) == token:
+            out.append(e)
+    return out
+
+
+def other_entry_has_receive_mode(
+    hass: HomeAssistant,
+    token: str,
+    mode: str,
+    exclude_entry_id: str | None,
+) -> bool:
+    """True if another integration entry (same token) already uses this receive mode.
+
+    exclude_entry_id skips the current entry so the same integration can switch
+    between polling and WebHook without being blocked by itself.
+    """
+    for e in same_official_token_entries(hass, token):
+        if exclude_entry_id is not None and e.entry_id == exclude_entry_id:
+            continue
+        if (e.options or {}).get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY) == mode:
+            return True
+    return False
+
+
+def is_official_max_platform_entry(entry: ConfigEntry) -> bool:
+    """Official Max API (platform-api.max.ru) only.
+
+    notify.a161.ru entries use ``INTEGRATION_TYPE_NOTIFY_A161`` and are excluded; receive
+    mode (polling / webhook) options apply only to the official API.
+    """
+    return (
+        entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
+        == INTEGRATION_TYPE_OFFICIAL
+    )
+
+
+def only_official_webhook_receive_entry(hass: HomeAssistant) -> bool:
+    """True if exactly one official-API integration uses Webhook receive mode.
+
+    notify.a161.ru is not counted. When this holds, the options UI may offer Long Polling
+    alongside Webhook so the user can switch without an extra «Send only» step.
+    """
+    n = 0
+    for e in hass.config_entries.async_entries(DOMAIN):
+        if not is_official_max_platform_entry(e):
+            continue
+        if (e.options or {}).get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY) == RECEIVE_MODE_WEBHOOK:
+            n += 1
+    return n == 1
+
+
+def only_official_long_polling_receive_entry(hass: HomeAssistant) -> bool:
+    """True if exactly one official-API integration uses Long Polling receive mode.
+
+    notify.a161.ru is not counted. When this holds, the options UI may offer Webhook
+    alongside Long Polling so the user can switch without an extra «Send only» step.
+    """
+    n = 0
+    for e in hass.config_entries.async_entries(DOMAIN):
+        if not is_official_max_platform_entry(e):
+            continue
+        if (e.options or {}).get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY) == RECEIVE_MODE_POLLING:
+            n += 1
+    return n == 1
 
 
 def get_unique_entry_title(

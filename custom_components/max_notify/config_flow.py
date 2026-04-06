@@ -17,6 +17,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers import selector
 from homeassistant.helpers.translation import async_get_translations
 
 from .api import validate_token
@@ -54,16 +55,32 @@ from .helpers import (
     buttons_display_str,
     get_unique_entry_title,
     normalize_buttons,
+    only_official_long_polling_receive_entry,
+    only_official_webhook_receive_entry,
+    other_entry_has_receive_mode,
 )
 from .services import register_send_message_service
 from .translations import (
     get_menu_labels,
     get_option_labels,
     get_receive_mode_title,
+    tr_key,
 )
-from .webhook import get_webhook_url
+from .webhook import (
+    async_clear_subscriptions_for_long_polling,
+    get_webhook_url,
+    webhook_receive_available,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+# Text fields for tokens/secrets: avoid browser "save password" / autofill (HA passes autocomplete to ha-textfield).
+_SENSITIVE_TEXT_SELECTOR = selector.TextSelector(
+    selector.TextSelectorConfig(
+        type=selector.TextSelectorType.TEXT,
+        autocomplete="off",
+    )
+)
 
 
 def _is_notify_a161_entry(entry: ConfigEntry) -> bool:
@@ -79,6 +96,30 @@ def _effective_integration_type(entry: ConfigEntry) -> str:
     if _is_notify_a161_entry(entry):
         return INTEGRATION_TYPE_NOTIFY_A161
     return entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
+
+
+async def _async_keyboard_menu_intro(
+    hass: HomeAssistant,
+    category: str,
+    step_id: str,
+    buttons: list[list[dict[str, Any]]] | None,
+) -> str:
+    """First sentence of keyboard menu: list or 'not configured yet'."""
+    try:
+        trans = await async_get_translations(hass, hass.config.language, category, [DOMAIN])
+    except Exception:
+        trans = {}
+    disp = buttons_display_str(buttons)
+    if not disp:
+        key = tr_key(DOMAIN, category, "step", step_id, "intro_no_buttons")
+        return trans.get(key, "")
+    tpl = trans.get(
+        tr_key(DOMAIN, category, "step", step_id, "intro_with_buttons"),
+        "",
+    )
+    if not tpl:
+        return ""
+    return tpl.format(buttons_list=disp)
 
 
 class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -136,12 +177,11 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user_official(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Official Max API setup step (token, format, receive mode)."""
+        """Official Max API: token, message format, and receive mode on one step."""
         _LOGGER.debug(
             "async_step_user_official: user_input=%s",
             "present" if user_input is not None else "None",
         )
-        # Pre-load config translations so the frontend has them for this step
         if user_input is None:
             try:
                 await async_get_translations(
@@ -151,19 +191,46 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 pass
         if user_input is not None:
             self._token = user_input[CONF_ACCESS_TOKEN].strip()
-            # Map translated labels back to keys for message_format and receive_mode
             try:
                 trans = await async_get_translations(
                     self.hass, self.hass.config.language, "config", [DOMAIN]
                 )
             except Exception:
                 trans = {}
-            msg_fmt_key_to_label = get_option_labels(trans, "config", "user", "message_format", ["text", "markdown", "html"])
-            recv_key_to_label = get_option_labels(trans, "config", "user", "receive_mode", [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK])
+            msg_fmt_key_to_label = get_option_labels(
+                trans,
+                "config",
+                "user",
+                "message_format",
+                ["text", "markdown", "html"],
+            )
+            recv_key_to_label = get_option_labels(
+                trans,
+                "config",
+                "user",
+                "receive_mode",
+                [
+                    RECEIVE_MODE_SEND_ONLY,
+                    RECEIVE_MODE_POLLING,
+                    RECEIVE_MODE_WEBHOOK,
+                ],
+            )
             msg_fmt_label_to_key = {v: k for k, v in msg_fmt_key_to_label.items()}
             recv_label_to_key = {v: k for k, v in recv_key_to_label.items()}
-            self._message_format = msg_fmt_label_to_key.get(user_input.get(CONF_MESSAGE_FORMAT), user_input.get(CONF_MESSAGE_FORMAT, "text")) or "text"
-            self._receive_mode = recv_label_to_key.get(user_input.get(CONF_RECEIVE_MODE), user_input.get(CONF_RECEIVE_MODE)) or RECEIVE_MODE_SEND_ONLY
+            self._message_format = (
+                msg_fmt_label_to_key.get(
+                    user_input.get(CONF_MESSAGE_FORMAT),
+                    user_input.get(CONF_MESSAGE_FORMAT, "text"),
+                )
+                or "text"
+            )
+            self._receive_mode = (
+                recv_label_to_key.get(
+                    user_input.get(CONF_RECEIVE_MODE),
+                    user_input.get(CONF_RECEIVE_MODE),
+                )
+                or RECEIVE_MODE_SEND_ONLY
+            )
             _LOGGER.debug(
                 "Token submitted: len=%s receive_mode=%s",
                 len(self._token) if self._token else 0,
@@ -172,24 +239,72 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not self._token:
                 return self.async_show_form(
                     step_id="user",
-                    data_schema=await self._schema_token_async(),
+                    data_schema=await self._schema_token_async(user_input),
                     errors={"base": "invalid_token"},
+                    description_placeholders=await self._async_user_step_placeholders(),
                 )
             err = await validate_token(self.hass, self._token, self._integration_type)
             if err:
                 return self.async_show_form(
                     step_id="user",
-                    data_schema=await self._schema_token_async(),
+                    data_schema=await self._schema_token_async(user_input),
                     errors={"base": err},
+                    description_placeholders=await self._async_user_step_placeholders(),
                 )
             if self._receive_mode == RECEIVE_MODE_SEND_ONLY:
                 self._webhook_secret = ""
                 self._buttons_rows = []
                 return await self.async_step_recipient(None)
-            # Polling or Webhook: webhook_secret first, then commands menu
-            return await self.async_step_receive_options(None)
+            if self._receive_mode == RECEIVE_MODE_POLLING:
+                if other_entry_has_receive_mode(
+                    self.hass,
+                    self._token,
+                    RECEIVE_MODE_WEBHOOK,
+                    None,
+                ):
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=await self._schema_token_async(user_input),
+                        errors={"base": "polling_blocked_by_webhook_other_entry"},
+                        description_placeholders=await self._async_user_step_placeholders(),
+                    )
+                ok, poll_err = await async_clear_subscriptions_for_long_polling(
+                    self.hass, self._token
+                )
+                if not ok:
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=await self._schema_token_async(user_input),
+                        errors={"base": poll_err or "unknown"},
+                        description_placeholders=await self._async_user_step_placeholders(),
+                    )
+            elif self._receive_mode == RECEIVE_MODE_WEBHOOK:
+                if not webhook_receive_available(self.hass):
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=await self._schema_token_async(user_input),
+                        errors={"base": "webhook_requires_external_https_url"},
+                        description_placeholders=await self._async_user_step_placeholders(),
+                    )
+                if other_entry_has_receive_mode(
+                    self.hass,
+                    self._token,
+                    RECEIVE_MODE_POLLING,
+                    None,
+                ):
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=await self._schema_token_async(user_input),
+                        errors={"base": "webhook_blocked_by_polling_other_entry"},
+                        description_placeholders=await self._async_user_step_placeholders(),
+                    )
+            return await self.async_step_webhook_secret(None)
 
-        return self.async_show_form(step_id="user", data_schema=await self._schema_token_async())
+        return self.async_show_form(
+            step_id="user",
+            data_schema=await self._schema_token_async(),
+            description_placeholders=await self._async_user_step_placeholders(),
+        )
 
     async def async_step_notify_info(
         self, user_input: dict[str, Any] | None = None
@@ -294,20 +409,22 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_receive_options(
+    async def async_step_webhook_secret(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step: webhook secret only; then show commands menu."""
+        """WebHook: optional secret. Long Polling skips to keyboard menu."""
+        if self._receive_mode == RECEIVE_MODE_POLLING:
+            return await self.async_step_receive_options_menu(None)
         if user_input is not None:
             self._webhook_secret = (user_input.get(CONF_WEBHOOK_SECRET) or "").strip()
             _LOGGER.debug(
-                "async_step_receive_options: webhook_secret_len=%s",
+                "async_step_webhook_secret: webhook_secret_len=%s",
                 len(self._webhook_secret),
             )
             return await self.async_step_receive_options_menu(None)
         return self.async_show_form(
-            step_id="receive_options",
-            data_schema=self._schema_receive_options(),
+            step_id="webhook_secret",
+            data_schema=self._schema_webhook_secret(),
             description_placeholders={
                 "receive_mode": await get_receive_mode_title(self.hass, self._receive_mode),
             },
@@ -349,7 +466,9 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             description_placeholders={
-                "buttons_list": buttons_display_str(self._buttons_rows) or "—"
+                "buttons_intro": await _async_keyboard_menu_intro(
+                    self.hass, "config", "receive_options_menu", self._buttons_rows
+                ),
             },
         )
 
@@ -545,8 +664,14 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Тип subentry «Добавить чат» для всех записей; для notify.a161.ru поток сразу прерывается с подсказкой."""
         return {SUBENTRY_TYPE_RECIPIENT: RecipientSubEntryFlowHandler}
 
-    async def _schema_token_async(self):
-        """First step schema with translated options for message_format and receive_mode."""
+    async def _schema_token_async(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Config step user: token, format, receive mode.
+
+        WebHook is not listed without an external HTTPS URL (required for WebHook).
+        Other receive modes are never hidden; cross-entry / Max conflicts are only on submit.
+        """
         try:
             trans = await async_get_translations(
                 self.hass, self.hass.config.language, "config", [DOMAIN]
@@ -554,26 +679,77 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:
             trans = {}
         msg_fmt_keys = ["text", "markdown", "html"]
-        recv_keys = [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK]
-        msg_fmt_labels = get_option_labels(trans, "config", "user", "message_format", msg_fmt_keys)
-        recv_labels = get_option_labels(trans, "config", "user", "receive_mode", recv_keys)
+        recv_keys = [
+            RECEIVE_MODE_SEND_ONLY,
+            RECEIVE_MODE_POLLING,
+            RECEIVE_MODE_WEBHOOK,
+        ]
+        if not webhook_receive_available(self.hass):
+            recv_keys = [k for k in recv_keys if k != RECEIVE_MODE_WEBHOOK]
+        msg_fmt_labels = get_option_labels(
+            trans, "config", "user", "message_format", msg_fmt_keys
+        )
+        recv_labels = get_option_labels(
+            trans, "config", "user", "receive_mode", recv_keys
+        )
         msg_fmt_list = [msg_fmt_labels[k] for k in msg_fmt_keys]
         recv_list = [recv_labels[k] for k in recv_keys]
-        suggested = {
-            CONF_ACCESS_TOKEN: self._token or "",
-            CONF_MESSAGE_FORMAT: msg_fmt_labels.get(self._message_format, self._message_format),
-            CONF_RECEIVE_MODE: recv_labels.get(self._receive_mode or RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_SEND_ONLY),
-        }
+        eff_recv = (
+            self._receive_mode
+            if self._receive_mode in recv_keys
+            else RECEIVE_MODE_SEND_ONLY
+        )
+        if user_input is not None:
+            suggested = {
+                CONF_ACCESS_TOKEN: user_input.get(CONF_ACCESS_TOKEN, ""),
+                CONF_MESSAGE_FORMAT: user_input.get(
+                    CONF_MESSAGE_FORMAT, msg_fmt_list[0]
+                ),
+                CONF_RECEIVE_MODE: user_input.get(CONF_RECEIVE_MODE, recv_list[0]),
+            }
+        else:
+            suggested = {
+                CONF_ACCESS_TOKEN: self._token or "",
+                CONF_MESSAGE_FORMAT: msg_fmt_labels.get(
+                    self._message_format, self._message_format
+                ),
+                CONF_RECEIVE_MODE: recv_labels.get(eff_recv, recv_list[0]),
+            }
         return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
-                    vol.Required(CONF_ACCESS_TOKEN): str,
-                    vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(msg_fmt_list),
-                    vol.Required(CONF_RECEIVE_MODE, default=recv_list[0]): vol.In(recv_list),
+                    vol.Required(CONF_ACCESS_TOKEN): _SENSITIVE_TEXT_SELECTOR,
+                    vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(
+                        msg_fmt_list
+                    ),
+                    vol.Required(CONF_RECEIVE_MODE, default=recv_list[0]): vol.In(
+                        recv_list
+                    ),
                 }
             ),
             suggested,
         )
+
+    async def _async_user_step_placeholders(self) -> dict[str, str]:
+        """Placeholders for config step user (receive_mode hint; depends on external HTTPS)."""
+        try:
+            trans = await async_get_translations(
+                self.hass, self.hass.config.language, "config", [DOMAIN]
+            )
+        except Exception:
+            trans = {}
+        hints = (
+            trans.get("config", {})
+            .get("step", {})
+            .get("user", {})
+            .get("hints", {})
+        )
+        key = (
+            "receive_mode_with_https"
+            if webhook_receive_available(self.hass)
+            else "receive_mode_no_https"
+        )
+        return {"receive_mode_hint": hints.get(key, "")}
 
     async def _schema_integration_type_async(self):
         """Initial schema with translated integration type options."""
@@ -625,7 +801,7 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
-                    vol.Required(CONF_ACCESS_TOKEN): str,
+                    vol.Required(CONF_ACCESS_TOKEN): _SENSITIVE_TEXT_SELECTOR,
                     vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(msg_fmt_list),
                 }
             ),
@@ -637,12 +813,16 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
-                    vol.Required(CONF_ACCESS_TOKEN): str,
+                    vol.Required(CONF_ACCESS_TOKEN): _SENSITIVE_TEXT_SELECTOR,
                     vol.Optional(CONF_MESSAGE_FORMAT, default="text"): vol.In(
                         ["text", "markdown", "html"]
                     ),
                     vol.Required(CONF_RECEIVE_MODE, default=RECEIVE_MODE_SEND_ONLY): vol.In(
-                        [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK],
+                        [
+                            RECEIVE_MODE_SEND_ONLY,
+                            RECEIVE_MODE_POLLING,
+                            RECEIVE_MODE_WEBHOOK,
+                        ],
                     ),
                 }
             ),
@@ -653,12 +833,12 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    def _schema_receive_options(self):
-        """Step shown only for Polling/Webhook: webhook secret; then commands via menu."""
+    def _schema_webhook_secret(self):
+        """Add flow: optional WebHook secret before keyboard buttons."""
         return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
-                    vol.Optional(CONF_WEBHOOK_SECRET, default=""): str,
+                    vol.Optional(CONF_WEBHOOK_SECRET, default=""): _SENSITIVE_TEXT_SELECTOR,
                 }
             ),
             {
@@ -719,7 +899,7 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
-                    vol.Optional(CONF_ACCESS_TOKEN, default=""): str,
+                    vol.Optional(CONF_ACCESS_TOKEN, default=""): _SENSITIVE_TEXT_SELECTOR,
                     vol.Optional(CONF_MESSAGE_FORMAT, default="text"): vol.In(
                         ["text", "markdown", "html"]
                     ),
@@ -736,7 +916,7 @@ class MaxNotifyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class MaxNotifyOptionsFlow(OptionsFlow):
-    """Options flow: token, format, receive mode, webhook secret, commands (add/remove menu)."""
+    """Options flow: token, format, receive mode, WebHook secret, commands (add/remove menu)."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -795,11 +975,21 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                         step_id="init",
                         data_schema=await self._schema_init_async(entry, user_input),
                         errors={"base": err},
+                        description_placeholders=await self._async_init_step_placeholders(
+                            entry, user_input
+                        ),
                     )
                 new_data[CONF_ACCESS_TOKEN] = token_input
             new_data[CONF_MESSAGE_FORMAT] = msg_fmt_label_to_key.get(raw_msg_fmt, raw_msg_fmt) or "text"
             new_receive_mode = recv_label_to_key.get(raw_recv, raw_recv) or RECEIVE_MODE_SEND_ONLY
-            new_webhook_secret = (user_input.get(CONF_WEBHOOK_SECRET) or "").strip()
+            if new_receive_mode == RECEIVE_MODE_WEBHOOK:
+                # Secret is set on the next step (webhook_secret), not on init.
+                new_webhook_secret = (entry.options or {}).get(CONF_WEBHOOK_SECRET, "")
+            elif new_receive_mode == RECEIVE_MODE_POLLING:
+                # Keep stored secret for a later switch to Webhook.
+                new_webhook_secret = (entry.options or {}).get(CONF_WEBHOOK_SECRET, "")
+            else:
+                new_webhook_secret = (user_input.get(CONF_WEBHOOK_SECRET) or "").strip()
             if new_receive_mode == RECEIVE_MODE_SEND_ONLY:
                 new_options = {
                     CONF_RECEIVE_MODE: new_receive_mode,
@@ -815,26 +1005,116 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_create_entry(data=new_options)
+            tok = new_data.get(CONF_ACCESS_TOKEN) or entry.data.get(
+                CONF_ACCESS_TOKEN, ""
+            )
+            if new_receive_mode == RECEIVE_MODE_POLLING:
+                if other_entry_has_receive_mode(
+                    self.hass,
+                    tok,
+                    RECEIVE_MODE_WEBHOOK,
+                    entry.entry_id,
+                ):
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=await self._schema_init_async(entry, user_input),
+                        errors={"base": "polling_blocked_by_webhook_other_entry"},
+                        description_placeholders=await self._async_init_step_placeholders(
+                            entry, user_input
+                        ),
+                    )
+                ok, poll_err = await async_clear_subscriptions_for_long_polling(
+                    self.hass, tok
+                )
+                if not ok:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=await self._schema_init_async(entry, user_input),
+                        errors={"base": poll_err or "unknown"},
+                        description_placeholders=await self._async_init_step_placeholders(
+                            entry, user_input
+                        ),
+                    )
+            elif new_receive_mode == RECEIVE_MODE_WEBHOOK:
+                if not webhook_receive_available(self.hass):
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=await self._schema_init_async(entry, user_input),
+                        errors={"base": "webhook_requires_external_https_url"},
+                        description_placeholders=await self._async_init_step_placeholders(
+                            entry, user_input
+                        ),
+                    )
+                if other_entry_has_receive_mode(
+                    self.hass,
+                    tok,
+                    RECEIVE_MODE_POLLING,
+                    entry.entry_id,
+                ):
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=await self._schema_init_async(entry, user_input),
+                        errors={"base": "webhook_blocked_by_polling_other_entry"},
+                        description_placeholders=await self._async_init_step_placeholders(
+                            entry, user_input
+                        ),
+                    )
             self._pending_data = new_data
             self._pending_options = {
                 CONF_RECEIVE_MODE: new_receive_mode,
                 CONF_WEBHOOK_SECRET: new_webhook_secret,
             }
             self._opt_buttons = normalize_buttons((entry.options or {}).get(CONF_BUTTONS))
+            if new_receive_mode == RECEIVE_MODE_WEBHOOK:
+                return await self.async_step_webhook_secret(None)
             return await self.async_step_buttons_menu(None)
 
         return self.async_show_form(
             step_id="init",
             data_schema=await self._schema_init_async(entry),
-            description_placeholders=self._description_placeholders(entry),
+            description_placeholders=await self._async_init_step_placeholders(entry),
+        )
+
+    async def async_step_webhook_secret(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Optional webhook secret after choosing Webhook on the init step."""
+        entry = self.config_entry
+        if user_input is not None:
+            self._pending_options[CONF_WEBHOOK_SECRET] = (
+                user_input.get(CONF_WEBHOOK_SECRET) or ""
+            ).strip()
+            return await self.async_step_buttons_menu(None)
+        try:
+            await async_get_translations(
+                self.hass, self.hass.config.language, "options", [DOMAIN]
+            )
+        except Exception:
+            pass
+        pending = self._pending_options or {}
+        suggested_secret = pending.get(
+            CONF_WEBHOOK_SECRET, (entry.options or {}).get(CONF_WEBHOOK_SECRET, "")
+        )
+        return self.async_show_form(
+            step_id="webhook_secret",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Optional(CONF_WEBHOOK_SECRET, default=""): _SENSITIVE_TEXT_SELECTOR,
+                    }
+                ),
+                {CONF_WEBHOOK_SECRET: suggested_secret},
+            ),
+            description_placeholders={
+                "webhook_url": get_webhook_url(self.hass, entry) or "",
+            },
         )
 
     async def async_step_init_notify(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Options flow for notify.a161.ru: token and message format (no keyboard UI)."""
+        """Options flow for notify.a161.ru: message format only (token is not changed here)."""
         entry = self.config_entry
-        integration_type = _effective_integration_type(entry)
         if user_input is None:
             try:
                 await async_get_translations(
@@ -859,22 +1139,6 @@ class MaxNotifyOptionsFlow(OptionsFlow):
             msg_fmt_label_to_key = {v: k for k, v in msg_fmt_key_to_label.items()}
             raw_msg_fmt = user_input.get(CONF_MESSAGE_FORMAT, "text")
             new_data = dict(entry.data)
-            token_input = (user_input.get(CONF_ACCESS_TOKEN) or "").strip()
-            if token_input:
-                err = await validate_token(self.hass, token_input, integration_type)
-                if err:
-                    return self.async_show_form(
-                        step_id="init_notify",
-                        data_schema=await self._schema_init_async(entry, user_input),
-                        errors={"base": err},
-                    )
-                if len(token_input) != 36:
-                    return self.async_show_form(
-                        step_id="init_notify",
-                        data_schema=await self._schema_init_async(entry, user_input),
-                        errors={"base": "invalid_notify_token_length"},
-                    )
-                new_data[CONF_ACCESS_TOKEN] = token_input
             new_data[CONF_MESSAGE_FORMAT] = (
                 msg_fmt_label_to_key.get(raw_msg_fmt, raw_msg_fmt) or "text"
             )
@@ -938,7 +1202,9 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                 }
             ),
             description_placeholders={
-                "buttons_list": buttons_display_str(self._opt_buttons) or "—"
+                "buttons_intro": await _async_keyboard_menu_intro(
+                    self.hass, "options", "buttons_menu", self._opt_buttons
+                ),
             },
         )
 
@@ -1199,17 +1465,117 @@ class MaxNotifyOptionsFlow(OptionsFlow):
         await self.hass.config_entries.async_reload(entry.entry_id)
         return self.async_create_entry(data=new_options)
 
-    def _description_placeholders(self, entry: ConfigEntry) -> dict[str, str]:
-        """Webhook URL for display when mode is webhook."""
-        url = get_webhook_url(self.hass, entry)
-        return {"webhook_url": url or "(configure external URL in HA)"}
+    async def _async_get_init_receive_mode_key(
+        self,
+        entry: ConfigEntry,
+        user_input: dict[str, Any] | None = None,
+    ) -> str:
+        """Saved or form-selected receive mode (internal keys)."""
+        try:
+            trans = await async_get_translations(
+                self.hass, self.hass.config.language, "options", [DOMAIN]
+            )
+        except Exception:
+            trans = {}
+        if user_input is not None:
+            recv_key_to_label = get_option_labels(
+                trans,
+                "options",
+                "init",
+                "receive_mode",
+                [
+                    RECEIVE_MODE_SEND_ONLY,
+                    RECEIVE_MODE_POLLING,
+                    RECEIVE_MODE_WEBHOOK,
+                ],
+            )
+            recv_label_to_key = {v: k for k, v in recv_key_to_label.items()}
+            raw = user_input.get(CONF_RECEIVE_MODE, "")
+            mode = recv_label_to_key.get(raw, raw) or RECEIVE_MODE_SEND_ONLY
+            if mode not in (
+                RECEIVE_MODE_SEND_ONLY,
+                RECEIVE_MODE_POLLING,
+                RECEIVE_MODE_WEBHOOK,
+            ):
+                mode = RECEIVE_MODE_SEND_ONLY
+            return mode
+        return (entry.options or {}).get(
+            CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY
+        )
+
+    async def _async_receive_mode_hint_options(
+        self,
+        entry: ConfigEntry,
+        user_input: dict[str, Any] | None = None,
+    ) -> str:
+        """Context-specific help under Receive mode (depends on mode + external HTTPS)."""
+        try:
+            trans = await async_get_translations(
+                self.hass, self.hass.config.language, "options", [DOMAIN]
+            )
+        except Exception:
+            trans = {}
+        hints = (
+            trans.get("options", {})
+            .get("step", {})
+            .get("init", {})
+            .get("hints", {})
+        )
+        mode = await self._async_get_init_receive_mode_key(entry, user_input)
+        if mode == RECEIVE_MODE_WEBHOOK:
+            return hints.get("receive_mode_webhook_active", "")
+        if mode == RECEIVE_MODE_POLLING:
+            if webhook_receive_available(self.hass):
+                return hints.get("receive_mode_polling_https", "")
+            return hints.get("receive_mode_polling_no_https", "")
+        return hints.get("receive_mode_send_only", "")
+
+    async def _async_init_step_placeholders(
+        self,
+        entry: ConfigEntry,
+        user_input: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        """Receive mode hint; WebHook URL line only when WebHook is the active mode."""
+        url = get_webhook_url(self.hass, entry) or ""
+        webhook_url_paragraph = ""
+        mode = await self._async_get_init_receive_mode_key(entry, user_input)
+        if (
+            mode == RECEIVE_MODE_WEBHOOK
+            and webhook_receive_available(self.hass)
+        ):
+            try:
+                trans = await async_get_translations(
+                    self.hass, self.hass.config.language, "options", [DOMAIN]
+                )
+            except Exception:
+                trans = {}
+            tpl = trans.get(
+                tr_key(DOMAIN, "options", "step", "init", "webhook_url_paragraph"),
+                "",
+            )
+            if tpl:
+                line = tpl.format(
+                    webhook_url=url or "(configure external URL in HA)"
+                ).strip()
+                if line:
+                    webhook_url_paragraph = f"\n\n{line}"
+        return {
+            "webhook_url_paragraph": webhook_url_paragraph,
+            "receive_mode_hint": await self._async_receive_mode_hint_options(
+                entry, user_input
+            ),
+        }
 
     async def _schema_init_async(
         self,
         entry: ConfigEntry,
         user_input: dict[str, Any] | None = None,
     ):
-        """Options init schema with translated message_format and receive_mode options."""
+        """Options init schema with translated message_format and receive_mode options.
+
+        Conflicts with other integrations on the same bot token are enforced in
+        async_step_init on submit, not by hiding modes here (so optional token changes work).
+        """
         try:
             trans = await async_get_translations(
                 self.hass, self.hass.config.language, "options", [DOMAIN]
@@ -1220,53 +1586,74 @@ class MaxNotifyOptionsFlow(OptionsFlow):
         msg_fmt_labels = get_option_labels(
             trans, "options", msg_step_id, "message_format", ["text", "markdown", "html"]
         )
+        recv_keys = [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK]
+        options = entry.options or {}
+        if options.get(CONF_RECEIVE_MODE) == RECEIVE_MODE_WEBHOOK:
+            if not only_official_webhook_receive_entry(self.hass):
+                recv_keys = [k for k in recv_keys if k != RECEIVE_MODE_POLLING]
+        elif options.get(CONF_RECEIVE_MODE) == RECEIVE_MODE_POLLING:
+            if not only_official_long_polling_receive_entry(self.hass):
+                recv_keys = [k for k in recv_keys if k != RECEIVE_MODE_WEBHOOK]
+        if not webhook_receive_available(self.hass):
+            if options.get(CONF_RECEIVE_MODE) != RECEIVE_MODE_WEBHOOK:
+                recv_keys = [k for k in recv_keys if k != RECEIVE_MODE_WEBHOOK]
         recv_labels = get_option_labels(
             trans,
             "options",
             "init",
             "receive_mode",
-            [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK],
+            recv_keys,
         )
         msg_fmt_list = [msg_fmt_labels[k] for k in ["text", "markdown", "html"]]
-        recv_list = [recv_labels[k] for k in [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK]]
-        options = entry.options or {}
+        recv_list = [recv_labels[k] for k in recv_keys]
+        cur_recv = options.get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY)
+        selected_mode = (
+            cur_recv if cur_recv in recv_keys else RECEIVE_MODE_SEND_ONLY
+        )
         if user_input is not None:
             suggested = {
                 CONF_ACCESS_TOKEN: user_input.get(CONF_ACCESS_TOKEN, ""),
                 CONF_MESSAGE_FORMAT: user_input.get(CONF_MESSAGE_FORMAT, msg_fmt_list[0]),
                 CONF_RECEIVE_MODE: user_input.get(CONF_RECEIVE_MODE, recv_list[0]),
-                CONF_WEBHOOK_SECRET: user_input.get(CONF_WEBHOOK_SECRET, ""),
             }
         else:
             cur_fmt = entry.data.get(CONF_MESSAGE_FORMAT, "text")
-            cur_recv = options.get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY)
+            eff_recv = (
+                selected_mode if selected_mode in recv_keys else RECEIVE_MODE_SEND_ONLY
+            )
             suggested = {
                 CONF_ACCESS_TOKEN: "",
                 CONF_MESSAGE_FORMAT: msg_fmt_labels.get(cur_fmt, cur_fmt),
-                CONF_RECEIVE_MODE: recv_labels.get(cur_recv, cur_recv),
-                CONF_WEBHOOK_SECRET: options.get(CONF_WEBHOOK_SECRET, ""),
+                CONF_RECEIVE_MODE: recv_labels.get(eff_recv, recv_list[0]),
             }
         if _is_notify_a161_entry(entry):
+            if user_input is not None:
+                suggested_a161 = {
+                    CONF_MESSAGE_FORMAT: user_input.get(
+                        CONF_MESSAGE_FORMAT, msg_fmt_list[0]
+                    ),
+                }
+            else:
+                cur_fmt = entry.data.get(CONF_MESSAGE_FORMAT, "text")
+                suggested_a161 = {
+                    CONF_MESSAGE_FORMAT: msg_fmt_labels.get(cur_fmt, cur_fmt),
+                }
             return self.add_suggested_values_to_schema(
                 vol.Schema(
                     {
-                        vol.Optional(CONF_ACCESS_TOKEN, default=""): str,
-                        vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(msg_fmt_list),
+                        vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(
+                            msg_fmt_list
+                        ),
                     }
                 ),
-                suggested,
+                suggested_a161,
             )
-        return self.add_suggested_values_to_schema(
-            vol.Schema(
-                {
-                    vol.Optional(CONF_ACCESS_TOKEN, default=""): str,
-                    vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(msg_fmt_list),
-                    vol.Required(CONF_RECEIVE_MODE, default=recv_list[0]): vol.In(recv_list),
-                    vol.Optional(CONF_WEBHOOK_SECRET, default=""): str,
-                }
-            ),
-            suggested,
-        )
+        schema_fields: dict[Any, Any] = {
+            vol.Optional(CONF_ACCESS_TOKEN, default=""): _SENSITIVE_TEXT_SELECTOR,
+            vol.Optional(CONF_MESSAGE_FORMAT, default=msg_fmt_list[0]): vol.In(msg_fmt_list),
+            vol.Required(CONF_RECEIVE_MODE, default=recv_list[0]): vol.In(recv_list),
+        }
+        return self.add_suggested_values_to_schema(vol.Schema(schema_fields), suggested)
 
     def _schema(
         self,
@@ -1280,19 +1667,17 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                 CONF_ACCESS_TOKEN: user_input.get(CONF_ACCESS_TOKEN, ""),
                 CONF_MESSAGE_FORMAT: user_input.get(CONF_MESSAGE_FORMAT, "text"),
                 CONF_RECEIVE_MODE: user_input.get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY),
-                CONF_WEBHOOK_SECRET: user_input.get(CONF_WEBHOOK_SECRET, ""),
             }
         else:
             suggested = {
                 CONF_ACCESS_TOKEN: "",
                 CONF_MESSAGE_FORMAT: entry.data.get(CONF_MESSAGE_FORMAT, "text"),
                 CONF_RECEIVE_MODE: options.get(CONF_RECEIVE_MODE, RECEIVE_MODE_SEND_ONLY),
-                CONF_WEBHOOK_SECRET: options.get(CONF_WEBHOOK_SECRET, ""),
             }
         return self.add_suggested_values_to_schema(
             vol.Schema(
                 {
-                    vol.Optional(CONF_ACCESS_TOKEN, default=""): str,
+                    vol.Optional(CONF_ACCESS_TOKEN, default=""): _SENSITIVE_TEXT_SELECTOR,
                     vol.Optional(CONF_MESSAGE_FORMAT, default="text"): vol.In(
                         ["text", "markdown", "html"]
                     ),
@@ -1303,7 +1688,6 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                             RECEIVE_MODE_WEBHOOK,
                         ]
                     ),
-                    vol.Optional(CONF_WEBHOOK_SECRET, default=""): str,
                 }
             ),
             suggested,

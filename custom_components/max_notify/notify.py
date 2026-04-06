@@ -44,6 +44,7 @@ from .const import (
     UPLOAD_VIDEO_TIMEOUT,
     VIDEO_PROCESSING_DELAY,
     VIDEO_READY_RETRY_DELAYS,
+    VIDEO_URL_DOWNLOAD_RETRY_DELAYS,
 )
 from .message_state import set_last_outgoing_message_id
 from .services import register_send_message_service
@@ -63,6 +64,8 @@ _VIDEO_EXT_TO_CONTENT_TYPE = {
     ".webm": "video/webm",
     ".mkv": "video/x-matroska",
 }
+# Transient HTTP statuses when fetching a video URL (clip still processing, overload, etc.).
+_RETRYABLE_VIDEO_DOWNLOAD_STATUSES = frozenset({400, 404, 408, 429, 500, 502, 503, 504})
 
 
 def _is_notify_a161_entry(entry: ConfigEntry) -> bool:
@@ -1217,28 +1220,77 @@ async def upload_video_and_send(
     content_type = "video/mp4"
     filename = "video.mp4"
     if file_path_or_url.startswith(("http://", "https://")):
+        delays = list(VIDEO_URL_DOWNLOAD_RETRY_DELAYS)
+        max_attempts = 1 + len(delays)
+        body = b""
+        content_type = "video/mp4"
+        filename = "video"
         try:
-            async with session.get(
-                file_path_or_url,
-                timeout=aiohttp.ClientTimeout(total=120),
-            ) as r:
-                if r.status != 200:
-                    _LOGGER.error("Download video failed: status=%s", r.status)
+            for attempt in range(max_attempts):
+                try:
+                    async with session.get(
+                        file_path_or_url,
+                        timeout=aiohttp.ClientTimeout(total=120),
+                    ) as r:
+                        if r.status == 200:
+                            raw_ct = r.headers.get("Content-Type") or ""
+                            if "video/" in raw_ct:
+                                content_type = raw_ct.split(";")[0].strip().lower()
+                            else:
+                                content_type = _content_type_from_path_video(file_path_or_url)
+                            filename = _filename_from_url(file_path_or_url) or "video"
+                            if not any(
+                                filename.lower().endswith(ext)
+                                for ext in _VIDEO_EXT_TO_CONTENT_TYPE
+                            ):
+                                ext = "mp4" if content_type == "video/mp4" else "mp4"
+                                filename = f"{filename}.{ext}"
+                            body = await r.read()
+                            _LOGGER.debug(
+                                "Downloaded video from URL: %d bytes, content_type=%s",
+                                len(body),
+                                content_type,
+                            )
+                            break
+                        err_text = (await r.text())[:300]
+                        will_retry = (
+                            attempt < max_attempts - 1
+                            and r.status in _RETRYABLE_VIDEO_DOWNLOAD_STATUSES
+                        )
+                        if will_retry:
+                            wait_s = delays[attempt]
+                            _LOGGER.warning(
+                                "Download video attempt %s/%s: status=%s, retry in %ss; body=%s",
+                                attempt + 1,
+                                max_attempts,
+                                r.status,
+                                wait_s,
+                                err_text,
+                            )
+                            await asyncio.sleep(wait_s)
+                            continue
+                        _LOGGER.error(
+                            "Download video failed: status=%s body=%s",
+                            r.status,
+                            err_text,
+                        )
+                        return
+                except aiohttp.ClientError as e:
+                    if attempt < max_attempts - 1:
+                        wait_s = delays[attempt]
+                        _LOGGER.warning(
+                            "Download video attempt %s/%s failed (%s), retry in %ss",
+                            attempt + 1,
+                            max_attempts,
+                            e,
+                            wait_s,
+                        )
+                        await asyncio.sleep(wait_s)
+                        continue
+                    _LOGGER.error("Download video failed: %s", e)
                     return
-                raw_ct = r.headers.get("Content-Type") or ""
-                if "video/" in raw_ct:
-                    content_type = raw_ct.split(";")[0].strip().lower()
-                else:
-                    content_type = _content_type_from_path_video(file_path_or_url)
-                filename = _filename_from_url(file_path_or_url) or "video"
-                if not any(filename.lower().endswith(ext) for ext in _VIDEO_EXT_TO_CONTENT_TYPE):
-                    ext = "mp4" if content_type == "video/mp4" else "mp4"
-                    filename = f"{filename}.{ext}"
-                body = await r.read()
-                _LOGGER.debug("Downloaded video from URL: %d bytes, content_type=%s", len(body), content_type)
-        except aiohttp.ClientError as e:
-            _LOGGER.error("Download video failed: %s", e)
-            return
+        except asyncio.CancelledError:
+            raise
     else:
         content_type = _content_type_from_path_video(file_path_or_url)
         filename = file_path_or_url.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "video.mp4"

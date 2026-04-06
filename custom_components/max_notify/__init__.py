@@ -8,21 +8,30 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    CONF_INTEGRATION_TYPE,
     CONF_RECEIVE_MODE,
+    CONF_WEBHOOK_SECRET,
     DOMAIN,
+    INTEGRATION_TYPE_OFFICIAL,
     RECEIVE_MODE_POLLING,
+    RECEIVE_MODE_SEND_ONLY,
     RECEIVE_MODE_WEBHOOK,
 )
+from .helpers import get_unique_entry_title
 from .services import register_send_message_service
+from .translations import get_receive_mode_title
 from .updates import start_polling, stop_polling
 from .webhook import (
-    MaxNotifyWebhookView,
+    MaxNotifyWebHookView,
+    log_webhook_https_diagnostics,
     register_webhook,
     unregister_webhook,
+    webhook_entry_can_receive,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,10 +64,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 def _ensure_webhook_view_registered(hass: HomeAssistant) -> None:
-    """Register webhook view once (idempotent)."""
+    """Register WebHook view once (idempotent)."""
     if getattr(_ensure_webhook_view_registered, "_registered", False):
         return
-    hass.http.register_view(MaxNotifyWebhookView())
+    hass.http.register_view(MaxNotifyWebHookView())
     _ensure_webhook_view_registered._registered = True
 
 
@@ -81,11 +90,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.add_update_listener(_async_update_listener)
 
     receive_mode = (entry.options or {}).get(CONF_RECEIVE_MODE, "send_only")
+    official = (
+        entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
+        == INTEGRATION_TYPE_OFFICIAL
+    )
+
+    if official:
+        log_webhook_https_diagnostics(hass, entry)
+        can_receive = webhook_entry_can_receive(hass, entry)
+        # Always remove Max subscriptions when HTTPS URL cannot be built (even if options
+        # already say send_only — Max may still hold a URL from before).
+        if not can_receive:
+            await unregister_webhook(hass, entry)
+        if receive_mode == RECEIVE_MODE_WEBHOOK and not can_receive:
+            _LOGGER.error(
+                "Max Notify [%s]: WebHook requires an external HTTPS URL for Home Assistant; "
+                "receive mode was switched to Send only. Configure Settings → System → Network, then set WebHook again in integration options.",
+                entry.title,
+            )
+            new_opts = dict(entry.options or {})
+            new_opts[CONF_RECEIVE_MODE] = RECEIVE_MODE_SEND_ONLY
+            new_opts[CONF_WEBHOOK_SECRET] = ""
+            mode_label = await get_receive_mode_title(hass, RECEIVE_MODE_SEND_ONLY)
+            base_title = f"Max Notify ({mode_label})"
+            new_title = get_unique_entry_title(
+                hass, DOMAIN, base_title, exclude_entry_id=entry.entry_id
+            )
+            hass.config_entries.async_update_entry(
+                entry, options=new_opts, title=new_title
+            )
+            receive_mode = RECEIVE_MODE_SEND_ONLY
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                f"webhook_disabled_no_https_{entry.entry_id}",
+                breaks_in_ha_version=None,
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="webhook_disabled_no_https",
+                translation_placeholders={"entry_title": entry.title or ""},
+            )
+
     if receive_mode == RECEIVE_MODE_POLLING:
         start_polling(hass, entry)
     elif receive_mode == RECEIVE_MODE_WEBHOOK:
         _LOGGER.debug(
-            "async_setup_entry: ensuring webhook view registered for entry_id=%s",
+            "async_setup_entry: ensuring WebHook view registered for entry_id=%s",
             entry.entry_id,
         )
         _ensure_webhook_view_registered(hass)

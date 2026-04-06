@@ -116,7 +116,7 @@
     "receive_mode_title": {
       "send_only": "Send only",
       "polling": "Long Polling",
-      "webhook": "Webhook"
+      "webhook": "WebHook"
     },
     "step": {
       "integration_type": {
@@ -167,7 +167,7 @@
       },
       "user": {
         "title": "Max Notify: Bot token",
-        "description": "Enter the bot access token, message format, and receive mode. For Send only no extra fields are needed.",
+        "description": "Enter the bot access token, message format, and receive mode. For Send only, no extra fields are needed.\n\nFor WebHook to become available in the list, configure an external HTTPS URL for Home Assistant (Settings → System → Network). See https://www.home-assistant.io/docs/configuration/basic/\n\nWhile a WebHook subscription is active in Max, Long Polling is unavailable, and vice versa — see https://dev.max.ru/docs-api/methods/POST/subscriptions",
         "data": {
           "access_token": "Access token",
           "message_format": "Message format",
@@ -176,7 +176,11 @@
         "data_description": {
           "access_token": "Bot token from MAX for developers",
           "message_format": "Plain text, Markdown or HTML (API format parameter).",
-          "receive_mode": "Send only — no receiving; Long Polling or Webhook — receive commands and button presses."
+          "receive_mode": "{receive_mode_hint}"
+        },
+        "hints": {
+          "receive_mode_with_https": "Send only: outgoing only. Long Polling: receive without a public URL. WebHook: via your Home Assistant HTTPS URL (Settings → System → Network). Max API does not allow Long Polling and WebHook at the same time for one bot. In integration options: while WebHook is selected, Long Polling is hidden; while Long Polling is selected, WebHook is hidden. To change receive mode, switch to Send only first.",
+          "receive_mode_no_https": "Send only: outgoing only. Long Polling: receive commands and button presses without a public HTTPS URL."
         },
         "options": {
           "message_format": {
@@ -187,15 +191,15 @@
           "receive_mode": {
             "send_only": "Send only",
             "polling": "Long Polling",
-            "webhook": "Webhook"
+            "webhook": "WebHook"
           }
         }
       },
-      "receive_options": {
-        "title": "Receive settings",
-        "description": "Mode: {receive_mode}. Enter webhook secret if needed. Then add or remove keyboard buttons on the next step.",
+      "webhook_secret": {
+        "title": "WebHook secret",
+        "description": "Mode: {receive_mode}. Enter WebHook secret if needed. For WebHook, an HTTPS external URL must be configured in Home Assistant (Settings → System → Network). See https://www.home-assistant.io/docs/configuration/basic/ Then add or remove keyboard buttons on the next step.",
         "data": {
-          "webhook_secret": "Webhook secret (optional)"
+          "webhook_secret": "WebHook secret (optional)"
         },
         "data_description": {
           "webhook_secret": "5–256 characters; Max sends in X-Max-Bot-Api-Secret header."
@@ -225,7 +229,9 @@
       },
       "receive_options_menu": {
         "title": "Keyboard buttons",
-        "description": "Current buttons: {buttons_list}. Choose an action and tap Submit.",
+        "intro_no_buttons": "No keyboard buttons configured yet. ",
+        "intro_with_buttons": "Current buttons: {buttons_list}. ",
+        "description": "{buttons_intro}Choose an action and tap Submit.",
         "data": {
           "action": "Action"
         },
@@ -289,6 +295,11 @@
       "invalid_notify_token_length": "notify.a161.ru token must be 36 characters long.",
       "invalid_auth": "Invalid token. Check the token in the MAX platform Integration section.",
       "cannot_connect": "Failed to connect to Max API. Check your network and try again.",
+      "polling_subscription_list_failed": "Could not read WebHook subscriptions from Max API. Check the network and try again.",
+      "polling_webhook_subscriptions_remain": "Long Polling cannot be used while a WebHook subscription is active on Max. Remove WebHook subscriptions (or choose Send only / WebHook in settings), then try again. See https://dev.max.ru/docs-api/methods/POST/subscriptions",
+      "polling_blocked_by_webhook_other_entry": "Another Max Notify integration already uses WebHook with this bot token. Stop WebHook there or use another token before enabling Long Polling here.",
+      "webhook_blocked_by_polling_other_entry": "Another Max Notify integration already uses Long Polling with this bot token. Stop Long Polling there or use another token before enabling WebHook here.",
+      "webhook_requires_external_https_url": "WebHook requires an external HTTPS URL for Home Assistant (Settings → System → Network, or Home Assistant Cloud). Configure it first, then choose WebHook again.",
       "unknown": "An unknown error occurred",
       "invalid_id_format": "Enter an integer (positive — personal chat, negative — group)",
       "notify_user_only": "For notify.a161.ru use only positive recipient IDs (user_id).",
@@ -305,13 +316,11 @@
     "step": {
       "init_notify": {
         "title": "notify.a161.ru settings",
-        "description": "Token (leave empty to keep) and message format. Changes apply when you submit. user_id stays fixed from initial setup.",
+        "description": "Message format only. To change the API token, remove this integration and add it again. user_id stays fixed from initial setup.",
         "data": {
-          "access_token": "New API token (optional)",
           "message_format": "Message format"
         },
         "data_description": {
-          "access_token": "Leave empty to keep the current token",
           "message_format": "Plain text, Markdown or HTML"
         },
         "options": {
@@ -324,18 +333,23 @@
       },
       "init": {
         "title": "Max Notify settings",
-        "description": "Token (leave empty to keep), message format, and receive mode. For Webhook, URL: {webhook_url}. HTTPS required. With Polling/Webhook you can add, edit and remove keyboard buttons on the next step (like adding chats).",
+        "description": "Token (optional), message format, receive mode.{webhook_url_paragraph}",
+        "webhook_url_paragraph": "WebHook URL registered with Max: {webhook_url}.",
         "data": {
           "access_token": "New API token (optional)",
           "message_format": "Message format",
-          "receive_mode": "Receive mode",
-          "webhook_secret": "Webhook secret (optional)"
+          "receive_mode": "Receive mode"
         },
         "data_description": {
           "access_token": "Leave empty to keep the current token",
           "message_format": "Plain text, Markdown or HTML",
-          "receive_mode": "Send only, Long Polling, or Webhook",
-          "webhook_secret": "5–256 chars; sent in X-Max-Bot-Api-Secret header"
+          "receive_mode": "{receive_mode_hint}"
+        },
+        "hints": {
+          "receive_mode_send_only": "Outgoing only. Choose Long Polling or WebHook to receive commands and button presses (Max allows only one receive mode per bot).",
+          "receive_mode_polling_https": "Long Polling works without a separate public URL. WebHook is available because Home Assistant has HTTPS — pick one mode; if this integration uses WebHook, Long Polling is hidden until you switch to Send only (unregisters WebHook).",
+          "receive_mode_polling_no_https": "Long Polling works without an external HTTPS URL. WebHook will appear after you configure Home Assistant’s external URL. WebHook and Long Polling cannot both be active on Max for the same bot.",
+          "receive_mode_webhook_active": "WebHook is active; Long Polling is not listed until you switch to Send only (unregisters WebHook). The URL above is registered with Max."
         },
         "options": {
           "message_format": {
@@ -346,13 +360,25 @@
           "receive_mode": {
             "send_only": "Send only",
             "polling": "Long Polling",
-            "webhook": "Webhook"
+            "webhook": "WebHook"
           }
+        }
+      },
+      "webhook_secret": {
+        "title": "Webhook secret",
+        "description": "WebHook URL registered with Max: {webhook_url}.\n\nOptional secret sent in X-Max-Bot-Api-Secret.",
+        "data": {
+          "webhook_secret": "Webhook secret (optional)"
+        },
+        "data_description": {
+          "webhook_secret": "5–256 characters; Max sends in X-Max-Bot-Api-Secret header"
         }
       },
       "buttons_menu": {
         "title": "Keyboard buttons",
-        "description": "Current buttons: {buttons_list}. Add, edit or remove buttons, then Finish.",
+        "intro_no_buttons": "No keyboard buttons configured yet. ",
+        "intro_with_buttons": "Current buttons: {buttons_list}. ",
+        "description": "{buttons_intro}Add, edit or remove buttons, then Finish.",
         "data": {
           "action": "Action"
         },
@@ -446,6 +472,13 @@
           "button_to_remove": ""
         }
       }
+    },
+    "error": {
+      "polling_subscription_list_failed": "Could not read WebHook subscriptions from Max API. Check the network and try again.",
+      "polling_webhook_subscriptions_remain": "Long Polling cannot be used while a WebHook subscription is active on Max. Remove WebHook subscriptions (or choose Send only / WebHook in settings), then try again. See https://dev.max.ru/docs-api/methods/POST/subscriptions",
+      "polling_blocked_by_webhook_other_entry": "Another Max Notify integration already uses WebHook with this bot token. Stop WebHook there or use another token before enabling Long Polling here.",
+      "webhook_blocked_by_polling_other_entry": "Another Max Notify integration already uses Long Polling with this bot token. Stop Long Polling there or use another token before enabling WebHook here.",
+      "webhook_requires_external_https_url": "WebHook requires an external HTTPS URL for Home Assistant (Settings → System → Network, or Home Assistant Cloud). Configure it first, then choose WebHook again."
     }
   },
   "config_subentries": {
@@ -473,6 +506,12 @@
           "title": "Add chat"
         }
       }
+    }
+  },
+  "issues": {
+    "webhook_disabled_no_https": {
+      "title": "Max Notify: WebHook turned off (no HTTPS URL)",
+      "description": "{entry_title} was set to WebHook, but Home Assistant has no external HTTPS base URL. Receive mode was switched to Send only. Configure Settings → System → Network (or Home Assistant Cloud), then choose WebHook again in the integration options if needed."
     }
   }
 }
