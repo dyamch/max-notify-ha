@@ -6,7 +6,6 @@ send_message:
         entity:
           filter:
             domain: notify
-            integration: max_notify
           multiple: true
           reorder: true
     message:
@@ -78,7 +77,6 @@ send_photo:
         entity:
           filter:
             domain: notify
-            integration: max_notify
           multiple: true
           reorder: true
     advanced:
@@ -142,7 +140,6 @@ send_video:
         entity:
           filter:
             domain: notify
-            integration: max_notify
           multiple: true
           reorder: true
     advanced:
@@ -206,7 +203,6 @@ send_document:
         entity:
           filter:
             domain: notify
-            integration: max_notify
           multiple: true
           reorder: true
     advanced:
@@ -260,7 +256,6 @@ delete_message:
         entity:
           filter:
             domain: notify
-            integration: max_notify
           multiple: true
           reorder: true
     recipient_id:
@@ -315,7 +310,6 @@ edit_message:
         entity:
           filter:
             domain: notify
-            integration: max_notify
           multiple: true
           reorder: true
     recipient_id:

@@ -54,6 +54,7 @@ from .helpers import (
     buttons_choice_list,
     buttons_display_str,
     get_unique_entry_title,
+    is_notify_a161_entry,
     normalize_buttons,
     only_official_long_polling_receive_entry,
     only_official_webhook_receive_entry,
@@ -83,17 +84,9 @@ _SENSITIVE_TEXT_SELECTOR = selector.TextSelector(
 )
 
 
-def _is_notify_a161_entry(entry: ConfigEntry) -> bool:
-    """True if entry is notify.a161.ru (by data or legacy title)."""
-    if entry.data.get(CONF_INTEGRATION_TYPE) == INTEGRATION_TYPE_NOTIFY_A161:
-        return True
-    title = entry.title or ""
-    return "notify.a161.ru" in title.lower()
-
-
 def _effective_integration_type(entry: ConfigEntry) -> str:
     """Resolved integration type for validation and options UI."""
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         return INTEGRATION_TYPE_NOTIFY_A161
     return entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
 
@@ -932,7 +925,7 @@ class MaxNotifyOptionsFlow(OptionsFlow):
     ) -> FlowResult:
         """Show form; on submit either save (send_only) or go to commands menu."""
         entry = self.config_entry
-        if _is_notify_a161_entry(entry):
+        if is_notify_a161_entry(entry):
             return await self.async_step_init_notify(user_input)
         integration_type = entry.data.get(
             CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL
@@ -1166,7 +1159,7 @@ class MaxNotifyOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Form: choose action (add/remove button or finish)."""
-        if _is_notify_a161_entry(self.config_entry):
+        if is_notify_a161_entry(self.config_entry):
             return await self.async_step_init_notify(None)
         option_keys: list[tuple[str, str]] = [
             ("opt_add_button", ""),
@@ -1582,7 +1575,7 @@ class MaxNotifyOptionsFlow(OptionsFlow):
             )
         except Exception:
             trans = {}
-        msg_step_id = "init_notify" if _is_notify_a161_entry(entry) else "init"
+        msg_step_id = "init_notify" if is_notify_a161_entry(entry) else "init"
         msg_fmt_labels = get_option_labels(
             trans, "options", msg_step_id, "message_format", ["text", "markdown", "html"]
         )
@@ -1626,7 +1619,7 @@ class MaxNotifyOptionsFlow(OptionsFlow):
                 CONF_MESSAGE_FORMAT: msg_fmt_labels.get(cur_fmt, cur_fmt),
                 CONF_RECEIVE_MODE: recv_labels.get(eff_recv, recv_list[0]),
             }
-        if _is_notify_a161_entry(entry):
+        if is_notify_a161_entry(entry):
             if user_input is not None:
                 suggested_a161 = {
                     CONF_MESSAGE_FORMAT: user_input.get(

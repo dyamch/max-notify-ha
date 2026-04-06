@@ -15,6 +15,7 @@ from .const import (
     CONF_INTEGRATION_TYPE,
     CONF_RECEIVE_MODE,
     DOMAIN,
+    INTEGRATION_TYPE_NOTIFY_A161,
     INTEGRATION_TYPE_OFFICIAL,
     RECEIVE_MODE_POLLING,
     RECEIVE_MODE_SEND_ONLY,
@@ -22,6 +23,14 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def is_notify_a161_entry(entry: ConfigEntry) -> bool:
+    """True if the config entry uses notify.a161.ru (stored type or legacy title)."""
+    if entry.data.get(CONF_INTEGRATION_TYPE) == INTEGRATION_TYPE_NOTIFY_A161:
+        return True
+    title = entry.title or ""
+    return "notify.a161.ru" in title.lower()
 
 
 def normalize_access_token(token: str | None) -> str:
@@ -70,6 +79,8 @@ def is_official_max_platform_entry(entry: ConfigEntry) -> bool:
     notify.a161.ru entries use ``INTEGRATION_TYPE_NOTIFY_A161`` and are excluded; receive
     mode (polling / webhook) options apply only to the official API.
     """
+    if is_notify_a161_entry(entry):
+        return False
     return (
         entry.data.get(CONF_INTEGRATION_TYPE, INTEGRATION_TYPE_OFFICIAL)
         == INTEGRATION_TYPE_OFFICIAL

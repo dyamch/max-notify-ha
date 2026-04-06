@@ -16,14 +16,12 @@ from .const import (
     CONF_CHAT_ID,
     CONF_CONFIG_ENTRY_ID,
     CONF_COUNT_REQUESTS,
-    CONF_INTEGRATION_TYPE,
     CONF_MESSAGE_ID,
     CONF_RECIPIENT_ID,
     CONF_SEND_KEYBOARD,
     CONF_USER_ID,
     DOMAIN,
     EVENT_MAX_NOTIFY_RECEIVED,
-    INTEGRATION_TYPE_NOTIFY_A161,
     SERVICE_DELETE_MESSAGE,
     SERVICE_EDIT_MESSAGE,
     SERVICE_SEND_DOCUMENT,
@@ -31,6 +29,7 @@ from .const import (
     SERVICE_SEND_PHOTO,
     SERVICE_SEND_VIDEO,
 )
+from .helpers import is_notify_a161_entry
 from .schemas import (
     SERVICE_DELETE_MESSAGE_SCHEMA,
     SERVICE_EDIT_MESSAGE_SCHEMA,
@@ -41,13 +40,6 @@ from .schemas import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _is_notify_a161_entry(entry: ConfigEntry) -> bool:
-    """Whether the entry uses notify.a161.ru mode."""
-    return (
-        entry.data.get(CONF_INTEGRATION_TYPE) == INTEGRATION_TYPE_NOTIFY_A161
-    )
 
 
 def _raise_notify_unsupported(operation: str) -> None:
@@ -507,7 +499,7 @@ async def async_send_message_handler(service: ServiceCall) -> None:
                 translation_key="invalid_config_entry",
                 translation_placeholders={"config_entry_id": config_entry_id or ""},
             )
-        if _is_notify_a161_entry(entry):
+        if is_notify_a161_entry(entry):
             if chat_ids:
                 _raise_notify_unsupported("chat_id targeting")
             allowed_user_ids = _notify_allowed_user_ids(entry)

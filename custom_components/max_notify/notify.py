@@ -31,12 +31,10 @@ from .const import (
     CHATS_PAGE_SIZE,
     CONF_ACCESS_TOKEN,
     CONF_CHAT_ID,
-    CONF_INTEGRATION_TYPE,
     CONF_MESSAGE_FORMAT,
     CONF_USER_ID,
     DOMAIN,
     FILE_UPLOAD_DELAY,
-    INTEGRATION_TYPE_NOTIFY_A161,
     FILE_READY_RETRY_DELAYS,
     MAX_MESSAGE_LENGTH,
     NOTIFY_A161_MAX_UPLOAD_BYTES,
@@ -46,6 +44,7 @@ from .const import (
     VIDEO_READY_RETRY_DELAYS,
     VIDEO_URL_DOWNLOAD_RETRY_DELAYS,
 )
+from .helpers import is_notify_a161_entry
 from .message_state import set_last_outgoing_message_id
 from .services import register_send_message_service
 
@@ -68,16 +67,9 @@ _VIDEO_EXT_TO_CONTENT_TYPE = {
 _RETRYABLE_VIDEO_DOWNLOAD_STATUSES = frozenset({400, 404, 408, 429, 500, 502, 503, 504})
 
 
-def _is_notify_a161_entry(entry: ConfigEntry) -> bool:
-    """Whether the config entry is using notify.a161.ru mode."""
-    return (
-        entry.data.get(CONF_INTEGRATION_TYPE) == INTEGRATION_TYPE_NOTIFY_A161
-    )
-
-
 def _api_base_url_for_entry(entry: ConfigEntry) -> str:
     """Return API base URL for current entry."""
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         return API_BASE_URL_NOTIFY_A161
     return API_BASE_URL
 
@@ -95,7 +87,7 @@ async def _notify_a161_with_pace_lock(
     run: Callable[[], Awaitable[bool]],
 ) -> bool:
     """Wait at least NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS after last successful send; then run()."""
-    if entry is None or not _is_notify_a161_entry(entry):
+    if entry is None or not is_notify_a161_entry(entry):
         return await run()
     async with _get_a161_pace_lock(hass, entry):
         domain_data = hass.data.setdefault(DOMAIN, {})
@@ -290,7 +282,7 @@ async def _resolve_dialog_chat_id(
     hass: HomeAssistant, entry: ConfigEntry, token: str, user_id: int
 ) -> int | None:
     """Resolve user_id to dialog chat_id via GET /chats (required for PMs)."""
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         # notify.a161.ru supports direct POST /messages?user_id only.
         return None
     url = f"{_api_base_url_for_entry(entry)}{API_PATH_CHATS}?count={CHATS_PAGE_SIZE}&v={API_VERSION}"
@@ -335,13 +327,13 @@ async def _get_message_url_and_recipient(
             cid = resolved
             url = f"{base_url}{API_PATH_MESSAGES}?chat_id={cid}&v={API_VERSION}"
             return url, {}
-        if _is_notify_a161_entry(entry):
+        if is_notify_a161_entry(entry):
             url = f"{base_url}{API_PATH_MESSAGES}?user_id={int(uid)}"
             return url, {}
         url = f"{base_url}{API_PATH_MESSAGES}?user_id={int(uid)}&v={API_VERSION}"
         return url, {}
     if cid is not None and int(cid) != 0:
-        if _is_notify_a161_entry(entry):
+        if is_notify_a161_entry(entry):
             if int(cid) > 0:
                 # notify.a161.ru ignores chat_id and accepts user_id only.
                 return f"{base_url}{API_PATH_MESSAGES}?user_id={int(cid)}", {}
@@ -429,7 +421,7 @@ async def delete_message(
         _LOGGER.error("delete_message: empty message_id")
         return False
     base = _api_base_url_for_entry(entry)
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         url = f"{base}{API_PATH_MESSAGES}?message_id={mid}"
     else:
         url = f"{base}{API_PATH_MESSAGES}?message_id={mid}&v={API_VERSION}"
@@ -497,7 +489,7 @@ async def edit_message(
         _LOGGER.warning("edit_message: no changes specified")
         return False
     base = _api_base_url_for_entry(entry)
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         url = f"{base}{API_PATH_MESSAGES}?message_id={mid}"
     else:
         url = f"{base}{API_PATH_MESSAGES}?message_id={mid}&v={API_VERSION}"
@@ -706,7 +698,7 @@ async def send_message_with_buttons(
     if not token:
         _LOGGER.error("No access token in config entry")
         return
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         _LOGGER.debug(
             "notify.a161.ru: inline keyboard not sent (not supported); sending text only"
         )
@@ -866,7 +858,7 @@ async def upload_image_and_send(
 
     upload_type = "file" if as_document else "image"
 
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         read_out = await _async_read_media_body_for_upload(
             hass, session, file_path_or_url, as_document=as_document
         )
@@ -1149,7 +1141,7 @@ async def upload_video_and_send(
     upload_url: str | None = None
     video_token: str | None = None
 
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         upload_req_url = f"{_api_base_url_for_entry(entry)}{API_PATH_UPLOADS}?type=video"
         try:
             async with session.post(
@@ -1306,7 +1298,7 @@ async def upload_video_and_send(
         _LOGGER.error("Video data is empty")
         return
 
-    if _is_notify_a161_entry(entry) and len(body) > NOTIFY_A161_MAX_UPLOAD_BYTES:
+    if is_notify_a161_entry(entry) and len(body) > NOTIFY_A161_MAX_UPLOAD_BYTES:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="a161_video_too_large",
@@ -1338,7 +1330,7 @@ async def upload_video_and_send(
 
     msg_format = entry.data.get(CONF_MESSAGE_FORMAT, "text")
 
-    if _is_notify_a161_entry(entry):
+    if is_notify_a161_entry(entry):
         # Same as official Max: transcode needs time; retries handle attachment.not.ready.
         await asyncio.sleep(VIDEO_PROCESSING_DELAY)
         attachments_a161: list[dict[str, Any]] = [
@@ -1507,12 +1499,12 @@ class MaxNotifyEntity(NotifyEntity):
                 cid = resolved
                 url = f"{base_url}{API_PATH_MESSAGES}?chat_id={cid}&v={API_VERSION}"
             else:
-                if _is_notify_a161_entry(self._entry):
+                if is_notify_a161_entry(self._entry):
                     url = f"{base_url}{API_PATH_MESSAGES}?user_id={int(uid)}"
                 else:
                     url = f"{base_url}{API_PATH_MESSAGES}?user_id={int(uid)}&v={API_VERSION}"
         elif cid is not None and int(cid) != 0:
-            if _is_notify_a161_entry(self._entry):
+            if is_notify_a161_entry(self._entry):
                 if int(cid) < 0:
                     _LOGGER.error(
                         "notify.a161.ru mode does not support group chats (chat_id=%s)",
@@ -1628,7 +1620,7 @@ class MaxNotifyEntity(NotifyEntity):
             )
             return False
 
-        if _is_notify_a161_entry(self._entry):
+        if is_notify_a161_entry(self._entry):
             await _notify_a161_with_pace_lock(self.hass, self._entry, _send_attempts)
         else:
             await _send_attempts()
