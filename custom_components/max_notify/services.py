@@ -16,6 +16,7 @@ from .const import (
     CONF_CHAT_ID,
     CONF_CONFIG_ENTRY_ID,
     CONF_COUNT_REQUESTS,
+    CONF_DISABLE_SSL,
     CONF_MESSAGE_ID,
     CONF_RECIPIENT_ID,
     CONF_SEND_KEYBOARD,
@@ -620,6 +621,7 @@ async def _send_photo_or_document(
 ) -> None:
     file_path_or_url = data["file"].strip()
     caption = data.get("caption")
+    disable_ssl = data.get(CONF_DISABLE_SSL, False)
     send_kb = data.get(CONF_SEND_KEYBOARD, True)
     buttons_provided = "buttons" in data
     count_requests = data.get(CONF_COUNT_REQUESTS)
@@ -655,7 +657,7 @@ async def _send_photo_or_document(
 
     _LOGGER.debug(
         "_send_photo_or_document: as_document=%s, file=%s, caption_present=%s, "
-        "entity_ids=%s, config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, buttons_present=%s",
+        "entity_ids=%s, config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, disable_ssl=%s, buttons_present=%s",
         as_document,
         file_path_or_url,
         bool(caption),
@@ -664,6 +666,7 @@ async def _send_photo_or_document(
         chat_ids,
         user_ids,
         count_requests,
+        disable_ssl,
         buttons_provided,
     )
 
@@ -709,6 +712,7 @@ async def _send_photo_or_document(
             as_document=as_document,
             buttons=all_buttons,
             count_requests=count_requests,
+            disable_ssl=disable_ssl,
             # notify=data.get("notify", True),  # отключено: Max не отключает push/звук
         )
 
@@ -729,6 +733,7 @@ async def _send_video(
 ) -> None:
     file_path_or_url = data["file"].strip()
     caption = data.get("caption")
+    disable_ssl = data.get(CONF_DISABLE_SSL, False)
     send_kb = data.get(CONF_SEND_KEYBOARD, True)
     buttons_provided = "buttons" in data
     entity_ids = data.get(ATTR_ENTITY_ID)
@@ -764,7 +769,7 @@ async def _send_video(
 
     _LOGGER.debug(
         "_send_video: file=%s, caption_present=%s, entity_ids=%s, "
-        "config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, buttons_present=%s",
+        "config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, disable_ssl=%s, buttons_present=%s",
         file_path_or_url,
         bool(caption),
         entity_ids,
@@ -772,6 +777,7 @@ async def _send_video(
         chat_ids,
         user_ids,
         count_requests,
+        disable_ssl,
         buttons_provided,
     )
 
@@ -816,6 +822,7 @@ async def _send_video(
             caption=caption,
             buttons=all_buttons,
             count_requests=count_requests,
+            disable_ssl=disable_ssl,
             # notify=data.get("notify", True),  # отключено: Max не отключает push/звук
         )
 

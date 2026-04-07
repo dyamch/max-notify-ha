@@ -36,6 +36,7 @@ from .const import (
     DOMAIN,
     FILE_UPLOAD_DELAY,
     FILE_READY_RETRY_DELAYS,
+    FILE_DOWNLOAD_TIMEOUT,
     MAX_MESSAGE_LENGTH,
     NOTIFY_A161_MAX_UPLOAD_BYTES,
     NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS,
@@ -65,6 +66,12 @@ _VIDEO_EXT_TO_CONTENT_TYPE = {
 }
 # Transient HTTP statuses when fetching a video URL (clip still processing, overload, etc.).
 _RETRYABLE_VIDEO_DOWNLOAD_STATUSES = frozenset({400, 404, 408, 429, 500, 502, 503, 504})
+_NETWORK_RETRY_DELAYS = (2, 4, 8)
+
+
+def _request_ssl(disable_ssl: bool) -> bool | None:
+    """Return aiohttp ssl parameter from service flag."""
+    return False if disable_ssl else None
 
 
 def _api_base_url_for_entry(entry: ConfigEntry) -> str:
@@ -201,6 +208,7 @@ async def _async_read_media_body_for_upload(
     file_path_or_url: str,
     *,
     as_document: bool,
+    disable_ssl: bool = False,
 ) -> tuple[bytes, str, str] | None:
     """Скачать по URL или прочитать локальный файл; вернуть (body, content_type, filename)."""
     file_path_or_url = file_path_or_url.strip()
@@ -215,7 +223,8 @@ async def _async_read_media_body_for_upload(
             async with session.get(
                 file_path_or_url,
                 headers=download_headers,
-                timeout=aiohttp.ClientTimeout(total=120 if as_document else 30),
+                timeout=aiohttp.ClientTimeout(total=FILE_DOWNLOAD_TIMEOUT),
+                ssl=_request_ssl(disable_ssl),
             ) as r:
                 if r.status != 200:
                     _LOGGER.error("Download media failed: status=%s", r.status)
@@ -358,10 +367,12 @@ async def _post_message_with_retry(
     log_label: str,
     count_requests: int | None = None,
     on_success: Callable[[str], None] | None = None,
+    disable_ssl: bool = False,
 ) -> bool:
     async def _inner() -> bool:
         last_error: str | None = None
         n = len(retry_delays) + 1 if count_requests is None else count_requests
+        n = max(n, len(_NETWORK_RETRY_DELAYS) + 1)
         for attempt in range(n):
             try:
                 async with session.post(
@@ -369,6 +380,7 @@ async def _post_message_with_retry(
                     json=payload,
                     headers={**headers, "Content-Type": "application/json"},
                     timeout=aiohttp.ClientTimeout(total=15),
+                    ssl=_request_ssl(disable_ssl),
                 ) as resp:
                     body = await resp.text()
                     if resp.status < 400:
@@ -376,7 +388,11 @@ async def _post_message_with_retry(
                             on_success(body)
                         _LOGGER.info("%s sent successfully (status=%s)", log_label, resp.status)
                         return True
-                    if resp.status == 400 and "attachment.not.ready" in body:
+                    if (
+                        resp.status == 400
+                        and "attachment.not.ready" in body
+                        and retry_delays
+                    ):
                         last_error = body
                         if attempt < n - 1:
                             delay = (
@@ -398,8 +414,29 @@ async def _post_message_with_retry(
                                 "Max is still processing the attachment; increase `count_requests` on send_photo or send_document for large files."
                             )
                     return False
-            except aiohttp.ClientError as e:
-                _LOGGER.error("Max API send %s request failed: %s", log_label, e)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last_error = str(e)
+                if attempt < n - 1:
+                    delay = (
+                        _NETWORK_RETRY_DELAYS[attempt]
+                        if attempt < len(_NETWORK_RETRY_DELAYS)
+                        else _NETWORK_RETRY_DELAYS[-1]
+                    )
+                    _LOGGER.warning(
+                        "Max API send %s request failed (attempt %s/%s): %s; retry in %ss",
+                        log_label,
+                        attempt + 1,
+                        n,
+                        e,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                _LOGGER.warning(
+                    "Max API send %s request failed after retries: %s",
+                    log_label,
+                    e,
+                )
                 return False
         if last_error:
             _LOGGER.error("Max API send %s failed after retries: %s", log_label, last_error[:300])
@@ -841,6 +878,7 @@ async def upload_image_and_send(
     buttons: list[list[dict[str, Any]]] | None = None,
     count_requests: int | None = None,
     notify: bool = True,
+    disable_ssl: bool = False,
 ) -> None:
     """Upload image/file to Max (POST /uploads) and send (POST /messages)."""
     token = entry.data.get(CONF_ACCESS_TOKEN)
@@ -860,7 +898,11 @@ async def upload_image_and_send(
 
     if is_notify_a161_entry(entry):
         read_out = await _async_read_media_body_for_upload(
-            hass, session, file_path_or_url, as_document=as_document
+            hass,
+            session,
+            file_path_or_url,
+            as_document=as_document,
+            disable_ssl=disable_ssl,
         )
         if read_out is None:
             return
@@ -887,6 +929,7 @@ async def upload_image_and_send(
                 upload_req_url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=15),
+                ssl=_request_ssl(disable_ssl),
             ) as resp:
                 text = await resp.text()
                 if resp.status != 200:
@@ -927,6 +970,7 @@ async def upload_image_and_send(
                 data=form,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=120),
+                ssl=_request_ssl(disable_ssl),
             ) as resp:
                 if resp.status >= 400:
                     text = await resp.text()
@@ -975,6 +1019,7 @@ async def upload_image_and_send(
             "notify_a161_media",
             count_requests,
             on_success=_on_success_a161,
+            disable_ssl=disable_ssl,
         )
         return
 
@@ -984,6 +1029,7 @@ async def upload_image_and_send(
             upload_req_url,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=10),
+            ssl=_request_ssl(disable_ssl),
         ) as resp:
             if resp.status != 200:
                 text = await resp.text()
@@ -1012,6 +1058,7 @@ async def upload_image_and_send(
                 file_path_or_url,
                 headers=download_headers,
                 timeout=aiohttp.ClientTimeout(total=30),
+                ssl=_request_ssl(disable_ssl),
             ) as r:
                 if r.status != 200:
                     _LOGGER.error("Download image failed: status=%s", r.status)
@@ -1054,6 +1101,7 @@ async def upload_image_and_send(
             data=form,
             headers={"Authorization": token},
             timeout=aiohttp.ClientTimeout(total=60),
+            ssl=_request_ssl(disable_ssl),
         ) as resp:
             if resp.status >= 400:
                 text = await resp.text()
@@ -1111,6 +1159,7 @@ async def upload_image_and_send(
         "Photo",
         count_requests,
         on_success=_on_success,
+        disable_ssl=disable_ssl,
     )
 
 
@@ -1123,6 +1172,7 @@ async def upload_video_and_send(
     buttons: list[list[dict[str, Any]]] | None = None,
     count_requests: int | None = None,
     notify: bool = True,
+    disable_ssl: bool = False,
 ) -> None:
     """Upload video to Max (POST /uploads?type=video) and send (POST /messages)."""
     token = entry.data.get(CONF_ACCESS_TOKEN)
@@ -1148,6 +1198,7 @@ async def upload_video_and_send(
                 upload_req_url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=15),
+                ssl=_request_ssl(disable_ssl),
             ) as resp:
                 text = await resp.text()
                 if resp.status != 200:
@@ -1188,6 +1239,7 @@ async def upload_video_and_send(
                 upload_req_url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=15),
+                ssl=_request_ssl(disable_ssl),
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()
@@ -1223,6 +1275,7 @@ async def upload_video_and_send(
                     async with session.get(
                         file_path_or_url,
                         timeout=aiohttp.ClientTimeout(total=120),
+                        ssl=_request_ssl(disable_ssl),
                     ) as r:
                         if r.status == 200:
                             raw_ct = r.headers.get("Content-Type") or ""
@@ -1316,6 +1369,7 @@ async def upload_video_and_send(
             data=form,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=UPLOAD_VIDEO_TIMEOUT),
+            ssl=_request_ssl(disable_ssl),
         ) as resp:
             if resp.status >= 400:
                 text = await resp.text()
@@ -1363,6 +1417,7 @@ async def upload_video_and_send(
             "notify_a161_video",
             count_requests,
             on_success=_on_success_a161_vid,
+            disable_ssl=disable_ssl,
         )
         return
 
@@ -1400,6 +1455,7 @@ async def upload_video_and_send(
         "Video",
         count_requests,
         on_success=_on_success,
+        disable_ssl=disable_ssl,
     )
 
 

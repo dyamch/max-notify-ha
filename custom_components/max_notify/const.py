@@ -18,6 +18,7 @@ CONF_USER_ID = "user_id"
 CONF_CHAT_ID = "chat_id"
 CONF_RECIPIENT_ID = "recipient_id"
 CONF_COUNT_REQUESTS = "count_requests"
+CONF_DISABLE_SSL = "disable_ssl"
 CONF_MESSAGE_ID = "message_id"
 
 SUBENTRY_TYPE_RECIPIENT = "recipient"
@@ -92,6 +93,7 @@ NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS = 1.0
 
 FILE_UPLOAD_DELAY = 1.5
 FILE_READY_RETRY_DELAYS = (3, 5, 8)
+FILE_DOWNLOAD_TIMEOUT = 120
 
 UPLOAD_VIDEO_TIMEOUT = 300
 # Retries for GET video from http(s) URL (e.g. Frigate/HA clip returns 400 until file is ready).

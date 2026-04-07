@@ -110,6 +110,14 @@ send_photo:
               min: 1
               max: 60
               mode: box
+        disable_ssl:
+          name: Disable SSL verification
+          description: >
+            Disable SSL certificate validation for HTTP requests in this send operation.
+            Use only when source/API endpoint uses self-signed or invalid certificates.
+          default: false
+          selector:
+            boolean:
         buttons:
           example: >
             {"Button 1":"button_1","Button 2":"button_2"} или
@@ -173,6 +181,14 @@ send_video:
               min: 1
               max: 60
               mode: box
+        disable_ssl:
+          name: Disable SSL verification
+          description: >
+            Disable SSL certificate validation for HTTP requests in this send operation.
+            Use only when source/API endpoint uses self-signed or invalid certificates.
+          default: false
+          selector:
+            boolean:
         buttons:
           example: >
             {"Button 1":"button_1","Button 2":"button_2"} или
@@ -236,6 +252,14 @@ send_document:
               min: 1
               max: 60
               mode: box
+        disable_ssl:
+          name: Disable SSL verification
+          description: >
+            Disable SSL certificate validation for HTTP requests in this send operation.
+            Use only when source/API endpoint uses self-signed or invalid certificates.
+          default: false
+          selector:
+            boolean:
         buttons:
           example: >
             {"Button 1":"button_1","Button 2":"button_2"} или

@@ -20,21 +20,25 @@
           "name": "Send keyboard",
           "description": "When enabled (default), the integration default inline keyboard is used if you omit Buttons or leave it empty; non-empty Buttons replace it. When disabled, only non-empty Buttons from this call are attached."
         },
-        "buttons": {
-          "name": "Buttons",
-          "description": "Custom inline buttons. Formats: object map (Text -> payload) or list of objects (text, payload). Interaction with the default keyboard is controlled by Send keyboard."
-        },
         "config_entry_id": {
           "name": "Integration",
           "description": "Max Notify integration to use when sending by chat_id/user_id (if several integrations exist)."
         },
+        "recipient_id": {
+          "name": "Recipient ID",
+          "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
+        },
         "chat_id": {
-          "name": "Chat ID",
-          "description": "Chat ID: positive — personal chat (User ID), negative — group. Use when not selecting entity_id."
+          "name": "Chat ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id for both personal chats and groups. Chat ID: positive — personal chat (User ID), negative — group."
         },
         "user_id": {
-          "name": "User ID",
-          "description": "User ID for personal chat (alternative to chat_id with positive number)."
+          "name": "User ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat (alternative to positive chat_id)."
+        },
+        "buttons": {
+          "name": "Buttons",
+          "description": "Custom inline buttons. Formats: object map (Text -> payload), list of objects (text, payload), or rows of objects (type: callback|message|link, text, payload/url). Link buttons require http(s) URLs only. How they combine with the default keyboard is controlled by Send keyboard."
         },
         "notify": {
           "name": "Notify",
@@ -49,66 +53,251 @@
       "name": "Send photo",
       "description": "Send a photo to Max chat(s). File: local path or image URL.",
       "fields": {
-        "file": { "name": "File", "description": "Local path or image URL (http/https)." },
-        "caption": { "name": "Caption", "description": "Optional caption for the photo." },
-        "entity_id": { "name": "Notify entity", "description": "Max Notify notify entity to send to." },
-        "config_entry_id": { "name": "Integration", "description": "Max Notify integration when sending by chat_id/user_id." },
-        "chat_id": { "name": "Chat ID", "description": "Chat ID: positive — personal, negative — group." },
-        "user_id": { "name": "User ID", "description": "User ID for personal chat." },
+        "file": {
+          "name": "File",
+          "description": "Local path (/config/..., /media/...) or image URL (http/https)."
+        },
+        "caption": {
+          "name": "Caption",
+          "description": "Optional caption for the photo."
+        },
+        "entity_id": {
+          "name": "Notify entity",
+          "description": "Max Notify notify entity to send to. You can select multiple."
+        },
+        "config_entry_id": {
+          "name": "Integration",
+          "description": "Max Notify integration when sending by chat_id/user_id."
+        },
+        "recipient_id": {
+          "name": "Recipient ID",
+          "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
+        },
+        "chat_id": {
+          "name": "Chat ID",
+          "description": "Chat ID: positive — personal, negative — group."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "User ID for personal chat."
+        },
+        "disable_ssl": {
+          "name": "Disable SSL verification",
+          "description": "Disables SSL certificate validation for this operation. Use only for endpoints with self-signed or invalid certificates."
+        },
+        "count_requests": {
+          "name": "Count requests",
+          "description": "How many times to POST the message while waiting for attachment processing (attachment.not.ready). Increase for large files."
+        },
         "send_keyboard": {
           "name": "Send keyboard",
           "description": "When enabled (default), the integration default inline keyboard is used if you omit Buttons or leave it empty; non-empty Buttons replace it. When disabled, only non-empty Buttons from this call are attached."
         },
         "buttons": {
           "name": "Buttons",
-          "description": "Custom inline buttons. Formats: object map (Text -> payload) or list of objects (text, payload). Interaction with the default keyboard is controlled by Send keyboard."
+          "description": "Custom inline buttons. Formats: object map (Text -> payload), list of objects (text, payload), or rows of objects (type: callback|message|link, text, payload/url). Link buttons require http(s) URLs only. How they combine with the default keyboard is controlled by Send keyboard."
         },
-        "notify": { "name": "Notify", "description": "If disabled, send without notifying recipients (silent)." },
-        "advanced": { "name": "Advanced" }
+        "notify": {
+          "name": "Notify",
+          "description": "If disabled, send without notifying recipients (silent)."
+        },
+        "advanced": {
+          "name": "Advanced"
+        }
       }
     },
     "send_document": {
       "name": "Send document",
-      "description": "Send a file as document to Max chat(s).",
+      "description": "Send a file as document to Max chat(s). May preserve quality vs. send_photo.",
       "fields": {
-        "file": { "name": "File", "description": "Local path or file URL — sent as document in Max." },
-        "caption": { "name": "Caption", "description": "Optional caption." },
-        "entity_id": { "name": "Notify entity", "description": "Max Notify notify entity to send to." },
-        "config_entry_id": { "name": "Integration", "description": "Max Notify integration when sending by chat_id/user_id." },
-        "chat_id": { "name": "Chat ID", "description": "Chat ID: positive — personal, negative — group." },
-        "user_id": { "name": "User ID", "description": "User ID for personal chat." },
+        "file": {
+          "name": "File",
+          "description": "Local path or file URL — sent as document in Max."
+        },
+        "caption": {
+          "name": "Caption",
+          "description": "Optional caption for the document."
+        },
+        "entity_id": {
+          "name": "Notify entity",
+          "description": "Max Notify notify entity to send to."
+        },
+        "config_entry_id": {
+          "name": "Integration",
+          "description": "Max Notify integration when sending by chat_id/user_id."
+        },
+        "recipient_id": {
+          "name": "Recipient ID",
+          "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
+        },
+        "chat_id": {
+          "name": "Chat ID",
+          "description": "Chat ID: positive — personal, negative — group."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "User ID for personal chat."
+        },
+        "disable_ssl": {
+          "name": "Disable SSL verification",
+          "description": "Disables SSL certificate validation for this operation. Use only for endpoints with self-signed or invalid certificates."
+        },
+        "count_requests": {
+          "name": "Count requests",
+          "description": "How many times to POST the message while waiting for attachment processing (attachment.not.ready). Increase for large files."
+        },
         "send_keyboard": {
           "name": "Send keyboard",
           "description": "When enabled (default), the integration default inline keyboard is used if you omit Buttons or leave it empty; non-empty Buttons replace it. When disabled, only non-empty Buttons from this call are attached."
         },
         "buttons": {
           "name": "Buttons",
-          "description": "Custom inline buttons. Formats: object map (Text -> payload) or list of objects (text, payload). Interaction with the default keyboard is controlled by Send keyboard."
+          "description": "Custom inline buttons. Formats: object map (Text -> payload), list of objects (text, payload), or rows of objects (type: callback|message|link, text, payload/url). Link buttons require http(s) URLs only. How they combine with the default keyboard is controlled by Send keyboard."
         },
-        "notify": { "name": "Notify", "description": "If disabled, send without notifying recipients (silent)." },
-        "advanced": { "name": "Advanced" }
+        "notify": {
+          "name": "Notify",
+          "description": "If disabled, send without notifying recipients (silent)."
+        },
+        "advanced": {
+          "name": "Advanced"
+        }
       }
     },
     "send_video": {
       "name": "Send video",
       "description": "Send a video to Max chat(s). File: local path or URL (mp4, mov, webm, mkv).",
       "fields": {
-        "file": { "name": "File", "description": "Local path or video URL." },
-        "caption": { "name": "Caption", "description": "Optional caption." },
-        "entity_id": { "name": "Notify entity", "description": "Max Notify notify entity to send to." },
-        "config_entry_id": { "name": "Integration", "description": "Max Notify integration when sending by chat_id/user_id." },
-        "chat_id": { "name": "Chat ID", "description": "Chat ID: positive — personal, negative — group." },
-        "user_id": { "name": "User ID", "description": "User ID for personal chat." },
+        "file": {
+          "name": "File",
+          "description": "Local path or video URL (mp4, mov, webm, mkv)."
+        },
+        "caption": {
+          "name": "Caption",
+          "description": "Optional caption for the video."
+        },
+        "entity_id": {
+          "name": "Notify entity",
+          "description": "Max Notify notify entity to send to."
+        },
+        "config_entry_id": {
+          "name": "Integration",
+          "description": "Max Notify integration when sending by chat_id/user_id."
+        },
+        "recipient_id": {
+          "name": "Recipient ID",
+          "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
+        },
+        "chat_id": {
+          "name": "Chat ID",
+          "description": "Chat ID: positive — personal, negative — group."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "User ID for personal chat."
+        },
+        "disable_ssl": {
+          "name": "Disable SSL verification",
+          "description": "Disables SSL certificate validation for this operation. Use only for endpoints with self-signed or invalid certificates."
+        },
+        "count_requests": {
+          "name": "Count requests",
+          "description": "How many times to POST the message while waiting for attachment processing (attachment.not.ready). Increase for large videos."
+        },
         "send_keyboard": {
           "name": "Send keyboard",
           "description": "When enabled (default), the integration default inline keyboard is used if you omit Buttons or leave it empty; non-empty Buttons replace it. When disabled, only non-empty Buttons from this call are attached."
         },
         "buttons": {
           "name": "Buttons",
-          "description": "Custom inline buttons. Formats: object map (Text -> payload) or list of objects (text, payload). Interaction with the default keyboard is controlled by Send keyboard."
+          "description": "Custom inline buttons. Formats: object map (Text -> payload), list of objects (text, payload), or rows of objects (type: callback|message|link, text, payload/url). Link buttons require http(s) URLs only. How they combine with the default keyboard is controlled by Send keyboard."
         },
-        "notify": { "name": "Notify", "description": "If disabled, send without notifying recipients (silent)." },
-        "advanced": { "name": "Advanced" }
+        "notify": {
+          "name": "Notify",
+          "description": "If disabled, send without notifying recipients (silent)."
+        },
+        "advanced": {
+          "name": "Advanced"
+        }
+      }
+    },
+    "delete_message": {
+      "name": "Delete message",
+      "description": "Delete a message in Max by ID. Use message_id from max_notify_received event. Messages older than 24 hours cannot be deleted.",
+      "fields": {
+        "message_id": {
+          "name": "Message ID",
+          "description": "ID of the message to delete (e.g. from trigger.event.data.message_id)."
+        },
+        "entity_id": {
+          "name": "Notify entity",
+          "description": "Max Notify notify entity. Can be used instead of config_entry_id."
+        },
+        "recipient_id": {
+          "name": "Recipient ID",
+          "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
+        },
+        "chat_id": {
+          "name": "Chat ID",
+          "description": "Chat ID: positive — personal, negative — group."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "User ID for personal chat."
+        },
+        "config_entry_id": {
+          "name": "Integration",
+          "description": "Max Notify integration to use (required if multiple exist)."
+        }
+      }
+    },
+    "edit_message": {
+      "name": "Edit message",
+      "description": "Edit a message in Max: change text, set or remove inline buttons. Messages older than 24 hours cannot be edited.",
+      "fields": {
+        "message_id": {
+          "name": "Message ID",
+          "description": "ID of the message to edit (e.g. from trigger.event.data.message_id)."
+        },
+        "text": {
+          "name": "Text",
+          "description": "New message text. Omit to keep current."
+        },
+        "send_keyboard": {
+          "name": "Send keyboard",
+          "description": "When enabled (default) and you set Buttons: empty Buttons restore the integration default keyboard; non-empty Buttons replace the message keyboard. When disabled, only non-empty Buttons from this call are applied."
+        },
+        "buttons": {
+          "name": "Buttons",
+          "description": "Custom inline buttons. Formats: object map (Text -> payload), list of objects (text, payload), rows of objects (type: callback|message|link, text, payload/url), or list of rows. Link buttons require http(s) URLs only. Interaction with the default keyboard is controlled by Send keyboard."
+        },
+        "remove_buttons": {
+          "name": "Remove buttons",
+          "description": "If true, remove all inline buttons from the message."
+        },
+        "format": {
+          "name": "Format",
+          "description": "Text format: text, markdown, or html."
+        },
+        "entity_id": {
+          "name": "Notify entity",
+          "description": "Max Notify notify entity. Can be used instead of config_entry_id."
+        },
+        "recipient_id": {
+          "name": "Recipient ID",
+          "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
+        },
+        "chat_id": {
+          "name": "Chat ID",
+          "description": "Chat ID: positive — personal, negative — group."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "User ID for personal chat."
+        },
+        "config_entry_id": {
+          "name": "Integration",
+          "description": "Max Notify integration to use (required if multiple exist)."
+        }
       }
     }
   },

@@ -150,3 +150,10 @@ class TestSendVideoSchema:
             "count_requests": 10,
         })
         assert data["count_requests"] == 10
+
+    def test_disable_ssl_flag(self) -> None:
+        data = SERVICE_SEND_VIDEO_SCHEMA({
+            "file": "/tmp/v.mp4",
+            "disable_ssl": True,
+        })
+        assert data["disable_ssl"] is True
