@@ -95,9 +95,17 @@ send_photo:
           selector:
             text:
         chat_id:
+          name: Chat ID (deprecated)
+          description: >
+            Deprecated. Use recipient_id instead.
+            Will be removed in version 1.5.0.
           selector:
             text:
         user_id:
+          name: User ID (deprecated)
+          description: >
+            Deprecated. Use recipient_id instead.
+            Will be removed in version 1.5.0.
           selector:
             text:
         count_requests:
@@ -118,11 +126,36 @@ send_photo:
           default: false
           selector:
             boolean:
-        url_basic_auth:
-          name: Basic auth for file URL
+        url_auth_type:
+          name: URL auth type
           description: >
-            Credentials for downloading file URL in format login:password.
-            If URL contains credentials (http://login:password@host/...), they are used automatically.
+            Authentication type for downloading media by URL: basic, digest or bearer.
+            Required when URL or parameters include auth credentials.
+          selector:
+            select:
+              options:
+                - basic
+                - digest
+                - bearer
+              mode: dropdown
+        url_auth_login:
+          name: URL auth login
+          selector:
+            text:
+        url_auth_password:
+          name: URL auth password
+          selector:
+            text:
+        url_auth_token:
+          name: URL auth token
+          selector:
+            text:
+        url_basic_auth:
+          name: Basic auth for file URL (deprecated)
+          description: >
+            Deprecated. Use url_auth_type=basic with url_auth_login/url_auth_password.
+            Legacy credentials format login:password.
+            Will be removed in version 1.5.0.
           selector:
             text:
         buttons:
@@ -173,9 +206,17 @@ send_video:
           selector:
             text:
         chat_id:
+          name: Chat ID (deprecated)
+          description: >
+            Deprecated. Use recipient_id instead.
+            Will be removed in version 1.5.0.
           selector:
             text:
         user_id:
+          name: User ID (deprecated)
+          description: >
+            Deprecated. Use recipient_id instead.
+            Will be removed in version 1.5.0.
           selector:
             text:
         count_requests:
@@ -196,11 +237,36 @@ send_video:
           default: false
           selector:
             boolean:
-        url_basic_auth:
-          name: Basic auth for file URL
+        url_auth_type:
+          name: URL auth type
           description: >
-            Credentials for downloading file URL in format login:password.
-            If URL contains credentials (http://login:password@host/...), they are used automatically.
+            Authentication type for downloading media by URL: basic, digest or bearer.
+            Required when URL or parameters include auth credentials.
+          selector:
+            select:
+              options:
+                - basic
+                - digest
+                - bearer
+              mode: dropdown
+        url_auth_login:
+          name: URL auth login
+          selector:
+            text:
+        url_auth_password:
+          name: URL auth password
+          selector:
+            text:
+        url_auth_token:
+          name: URL auth token
+          selector:
+            text:
+        url_basic_auth:
+          name: Basic auth for file URL (deprecated)
+          description: >
+            Deprecated. Use url_auth_type=basic with url_auth_login/url_auth_password.
+            Legacy credentials format login:password.
+            Will be removed in version 1.5.0.
           selector:
             text:
         buttons:
@@ -251,9 +317,17 @@ send_document:
           selector:
             text:
         chat_id:
+          name: Chat ID (deprecated)
+          description: >
+            Deprecated. Use recipient_id instead.
+            Will be removed in version 1.5.0.
           selector:
             text:
         user_id:
+          name: User ID (deprecated)
+          description: >
+            Deprecated. Use recipient_id instead.
+            Will be removed in version 1.5.0.
           selector:
             text:
         count_requests:
@@ -274,11 +348,36 @@ send_document:
           default: false
           selector:
             boolean:
-        url_basic_auth:
-          name: Basic auth for file URL
+        url_auth_type:
+          name: URL auth type
           description: >
-            Credentials for downloading file URL in format login:password.
-            If URL contains credentials (http://login:password@host/...), they are used automatically.
+            Authentication type for downloading media by URL: basic, digest or bearer.
+            Required when URL or parameters include auth credentials.
+          selector:
+            select:
+              options:
+                - basic
+                - digest
+                - bearer
+              mode: dropdown
+        url_auth_login:
+          name: URL auth login
+          selector:
+            text:
+        url_auth_password:
+          name: URL auth password
+          selector:
+            text:
+        url_auth_token:
+          name: URL auth token
+          selector:
+            text:
+        url_basic_auth:
+          name: Basic auth for file URL (deprecated)
+          description: >
+            Deprecated. Use url_auth_type=basic with url_auth_login/url_auth_password.
+            Legacy credentials format login:password.
+            Will be removed in version 1.5.0.
           selector:
             text:
         buttons:
@@ -307,9 +406,17 @@ delete_message:
       selector:
         text:
     chat_id:
+      name: Chat ID (deprecated)
+      description: >
+        Deprecated. Use recipient_id instead.
+        Will be removed in version 1.5.0.
       selector:
         text:
     user_id:
+      name: User ID (deprecated)
+      description: >
+        Deprecated. Use recipient_id instead.
+        Will be removed in version 1.5.0.
       selector:
         text:
     config_entry_id:
@@ -361,9 +468,17 @@ edit_message:
       selector:
         text:
     chat_id:
+      name: Chat ID (deprecated)
+      description: >
+        Deprecated. Use recipient_id instead.
+        Will be removed in version 1.5.0.
       selector:
         text:
     user_id:
+      name: User ID (deprecated)
+      description: >
+        Deprecated. Use recipient_id instead.
+        Will be removed in version 1.5.0.
       selector:
         text:
     config_entry_id:

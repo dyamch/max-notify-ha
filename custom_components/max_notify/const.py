@@ -20,6 +20,10 @@ CONF_RECIPIENT_ID = "recipient_id"
 CONF_COUNT_REQUESTS = "count_requests"
 CONF_DISABLE_SSL = "disable_ssl"
 CONF_URL_BASIC_AUTH = "url_basic_auth"
+CONF_URL_AUTH_TYPE = "url_auth_type"
+CONF_URL_AUTH_LOGIN = "url_auth_login"
+CONF_URL_AUTH_PASSWORD = "url_auth_password"
+CONF_URL_AUTH_TOKEN = "url_auth_token"
 CONF_MESSAGE_ID = "message_id"
 CONF_UPDATES_INTERVAL = "updates_interval"
 CONF_A161_POLLING_GRACE_STARTED_AT = "a161_polling_grace_started_at"
@@ -60,6 +64,11 @@ RECEIVE_MODE_WEBHOOK = "webhook"
 RECEIVE_MODES = [RECEIVE_MODE_SEND_ONLY, RECEIVE_MODE_POLLING, RECEIVE_MODE_WEBHOOK]
 WEBHOOK_PATH_PREFIX = "/api/max_notify"
 WEBHOOK_SECRET_HEADER = "X-Max-Bot-Api-Secret"
+
+URL_AUTH_TYPE_BASIC = "basic"
+URL_AUTH_TYPE_DIGEST = "digest"
+URL_AUTH_TYPE_BEARER = "bearer"
+URL_AUTH_TYPES = [URL_AUTH_TYPE_BASIC, URL_AUTH_TYPE_DIGEST, URL_AUTH_TYPE_BEARER]
 
 # Long polling (GET /updates)
 POLLING_TIMEOUT = 25
@@ -103,6 +112,10 @@ NOTIFY_A161_POLLING_GRACE_SECONDS = 24 * 60 * 60
 FILE_UPLOAD_DELAY = 1.5
 FILE_READY_RETRY_DELAYS = (3, 5, 8)
 FILE_DOWNLOAD_TIMEOUT = 120
+# Unified retry profile for network/API-level request failures
+# (used for both official API and notify.a161.ru requests).
+API_REQUEST_RETRY_DELAYS = (2, 4, 8)
+API_REQUEST_RETRYABLE_STATUSES = (408, 425, 429, 500, 502, 503, 504)
 
 UPLOAD_VIDEO_TIMEOUT = 300
 # Retries for GET video from http(s) URL (e.g. Frigate/HA clip returns 400 until file is ready).

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import functools
 import json
 import logging
 import mimetypes
 import os
 import time
+import re
+import secrets
+import hashlib
 from typing import Any, Awaitable, Callable
 from urllib.parse import unquote, urlparse, urlunparse
 
@@ -41,12 +46,17 @@ from .const import (
     CONF_MESSAGE_FORMAT,
     CONF_USER_ID,
     DOMAIN,
+    API_REQUEST_RETRY_DELAYS,
+    API_REQUEST_RETRYABLE_STATUSES,
     FILE_UPLOAD_DELAY,
     FILE_READY_RETRY_DELAYS,
     FILE_DOWNLOAD_TIMEOUT,
     MAX_MESSAGE_LENGTH,
     NOTIFY_A161_MAX_UPLOAD_BYTES,
     NOTIFY_A161_MIN_SEND_INTERVAL_SECONDS,
+    URL_AUTH_TYPE_BASIC,
+    URL_AUTH_TYPE_BEARER,
+    URL_AUTH_TYPE_DIGEST,
     UPLOAD_VIDEO_TIMEOUT,
     VIDEO_PROCESSING_DELAY,
     VIDEO_READY_RETRY_DELAYS,
@@ -71,9 +81,53 @@ _VIDEO_EXT_TO_CONTENT_TYPE = {
     ".webm": "video/webm",
     ".mkv": "video/x-matroska",
 }
+# Extensions considered already meaningful for document/media filenames.
+_KNOWN_MEDIA_OR_DOC_EXTS = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".svg",
+        ".heic",
+        ".heif",
+        ".tif",
+        ".tiff",
+        ".pdf",
+        ".txt",
+        ".csv",
+        ".json",
+        ".xml",
+        ".zip",
+        ".rar",
+        ".7z",
+        ".tar",
+        ".gz",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".odt",
+        ".ods",
+        ".rtf",
+        ".mp4",
+        ".mov",
+        ".webm",
+        ".mkv",
+        ".avi",
+        ".m4v",
+        ".mp3",
+        ".wav",
+        ".ogg",
+        ".m4a",
+    }
+)
 # Transient HTTP statuses when fetching a video URL (clip still processing, overload, etc.).
 _RETRYABLE_VIDEO_DOWNLOAD_STATUSES = frozenset({400, 404, 408, 429, 500, 502, 503, 504})
-_NETWORK_RETRY_DELAYS = (2, 4, 8)
 
 
 def _mark_a161_button_send(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -163,23 +217,52 @@ def _filename_from_url(url: str) -> str | None:
     return name or None
 
 
-def _extract_url_and_basic_auth(
-    file_url: str, basic_auth_raw: str | None
-) -> tuple[str, aiohttp.BasicAuth | None]:
-    """Build sanitized URL + BasicAuth from service field or URL userinfo."""
+def _filename_with_content_type(filename: str, content_type: str) -> str:
+    """Normalize filename extension by detected content type."""
+    ct = content_type.split(";", 1)[0].strip().lower()
+    guessed_ext = mimetypes.guess_extension(ct) or ""
+    ext = guessed_ext.lower()
+    if ext == ".jpe":
+        ext = ".jpg"
+    if not ext:
+        return filename
+    base, dot, cur_ext = filename.rpartition(".")
+    if dot and cur_ext:
+        cur = f".{cur_ext}".lower()
+        # Keep known doc/media extension even if server reports odd content-type.
+        if cur in _KNOWN_MEDIA_OR_DOC_EXTS:
+            return filename
+        # Replace unknown/non-standard extension (e.g. .cgi) with detected extension.
+        if cur != ext:
+            return f"{base}{ext}" if base else f"{filename}{ext}"
+        return filename
+    return f"{filename}{ext}"
+
+
+def _extract_url_auth_source(
+    file_url: str,
+    *,
+    auth_login: str | None,
+    auth_password: str | None,
+    url_basic_auth: str | None,
+) -> tuple[str, str | None, str]:
+    """Return sanitized URL and login/password for Basic or Digest auth."""
     parsed = urlparse(file_url)
+    username = auth_login
+    password = auth_password or ""
 
-    username: str | None = None
-    password: str = ""
+    if (username is None) != (auth_password is None):
+        raise ServiceValidationError(
+            "Both url_auth_login and url_auth_password must be set together"
+        )
 
-    if basic_auth_raw:
-        value = basic_auth_raw.strip()
-        if ":" in value:
-            username, password = value.split(":", 1)
-        else:
-            _LOGGER.warning(
-                "Invalid url_basic_auth format (expected login:password), ignoring it"
+    if username is None and url_basic_auth:
+        value = url_basic_auth.strip()
+        if ":" not in value:
+            raise ServiceValidationError(
+                "Invalid url_basic_auth format (expected login:password)"
             )
+        username, password = value.split(":", 1)
 
     if username is None and parsed.username is not None:
         username = unquote(parsed.username)
@@ -190,9 +273,237 @@ def _extract_url_and_basic_auth(
         host_netloc = parsed.netloc.rsplit("@", 1)[-1]
         sanitized_url = urlunparse(parsed._replace(netloc=host_netloc))
 
-    if username is None:
-        return sanitized_url, None
-    return sanitized_url, aiohttp.BasicAuth(username, password)
+    return sanitized_url, username, password
+
+
+_DIGEST_ATTR_RE = re.compile(r'([a-zA-Z_]+)=("([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"|[^,]+)')
+
+
+def _parse_digest_challenge(header_value: str) -> dict[str, str]:
+    """Parse WWW-Authenticate Digest challenge."""
+    h = header_value.strip()
+    if h[:6].lower() != "digest":
+        return {}
+    payload = h[6:].strip()
+    out: dict[str, str] = {}
+    for match in _DIGEST_ATTR_RE.finditer(payload):
+        key = match.group(1).lower()
+        raw = match.group(2).strip()
+        if raw.startswith('"') and raw.endswith('"'):
+            raw = raw[1:-1].replace('\\"', '"')
+        out[key] = raw
+    return out
+
+
+def _md5_hex(value: str) -> str:
+    return hashlib.md5(value.encode("utf-8")).hexdigest()
+
+
+def _build_digest_authorization(
+    *,
+    method: str,
+    uri: str,
+    username: str,
+    password: str,
+    challenge: dict[str, str],
+    nc: int,
+    use_qop: bool = True,
+) -> str:
+    """Build RFC7616 Digest Authorization header (MD5/qop=auth)."""
+    realm = challenge.get("realm", "")
+    nonce = challenge.get("nonce", "")
+    qop_raw = challenge.get("qop", "auth")
+    qop_choices = [item.strip() for item in qop_raw.split(",") if item.strip()]
+    qop = "auth" if "auth" in qop_choices else (qop_choices[0] if qop_choices else "auth")
+    opaque = challenge.get("opaque")
+    algorithm = (challenge.get("algorithm") or "MD5").upper()
+    if algorithm != "MD5":
+        raise ServiceValidationError(
+            f"Unsupported digest algorithm: {algorithm}. Only MD5 is supported."
+        )
+
+    cnonce = secrets.token_hex(8)
+    nc_value = f"{nc:08x}"
+    ha1 = _md5_hex(f"{username}:{realm}:{password}")
+    ha2 = _md5_hex(f"{method}:{uri}")
+    if use_qop and qop:
+        response = _md5_hex(f"{ha1}:{nonce}:{nc_value}:{cnonce}:{qop}:{ha2}")
+    else:
+        response = _md5_hex(f"{ha1}:{nonce}:{ha2}")
+
+    parts = [
+        f'username="{username}"',
+        f'realm="{realm}"',
+        f'nonce="{nonce}"',
+        f'uri="{uri}"',
+        f'algorithm={algorithm}',
+        f'response="{response}"',
+    ]
+    if use_qop and qop:
+        parts.extend([f"qop={qop}", f"nc={nc_value}", f'cnonce="{cnonce}"'])
+    if opaque:
+        parts.append(f'opaque="{opaque}"')
+    return "Digest " + ", ".join(parts)
+
+
+def _download_http_media_digest_requests(
+    url: str,
+    headers: dict[str, str],
+    username: str,
+    password: str,
+    *,
+    disable_ssl: bool,
+    timeout_s: int,
+) -> tuple[int, dict[str, str], bytes]:
+    """Download URL via requests HTTPDigestAuth (sync helper for executor)."""
+    import requests
+    from requests.auth import HTTPDigestAuth
+
+    resp = requests.get(
+        url,
+        headers=headers,
+        auth=HTTPDigestAuth(username, password),
+        timeout=timeout_s,
+        verify=not disable_ssl,
+    )
+    return resp.status_code, dict(resp.headers), resp.content
+
+
+async def _download_http_media(
+    session: aiohttp.ClientSession,
+    file_url: str,
+    *,
+    disable_ssl: bool,
+    as_document: bool,
+    auth_type: str | None = None,
+    auth_login: str | None = None,
+    auth_password: str | None = None,
+    auth_token: str | None = None,
+    url_basic_auth: str | None = None,
+    timeout_s: int = FILE_DOWNLOAD_TIMEOUT,
+) -> aiohttp.ClientResponse:
+    """Download HTTP media using selected auth type."""
+    default_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*" if as_document else "image/webp,image/apng,image/*,*/*;q=0.8",
+    }
+    req_timeout = aiohttp.ClientTimeout(total=timeout_s)
+
+    normalized_url, source_login, source_password = _extract_url_auth_source(
+        file_url,
+        auth_login=auth_login,
+        auth_password=auth_password,
+        url_basic_auth=url_basic_auth,
+    )
+
+    if auth_type is None:
+        return await session.get(
+            normalized_url,
+            headers=default_headers,
+            timeout=req_timeout,
+            ssl=_request_ssl(disable_ssl),
+        )
+
+    if auth_type == URL_AUTH_TYPE_BEARER:
+        headers = dict(default_headers)
+        headers["Authorization"] = f"Bearer {auth_token}"
+        return await session.get(
+            normalized_url,
+            headers=headers,
+            timeout=req_timeout,
+            ssl=_request_ssl(disable_ssl),
+        )
+
+    if auth_type == URL_AUTH_TYPE_BASIC:
+        if source_login is None:
+            raise ServiceValidationError(
+                "Basic auth requires URL credentials, url_auth_login/url_auth_password, or url_basic_auth"
+            )
+        headers = dict(default_headers)
+        token_raw = f"{source_login}:{source_password}".encode("utf-8")
+        headers["Authorization"] = f"Basic {base64.b64encode(token_raw).decode('ascii')}"
+        return await session.get(
+            normalized_url,
+            headers=headers,
+            timeout=req_timeout,
+            ssl=_request_ssl(disable_ssl),
+        )
+
+    if auth_type == URL_AUTH_TYPE_DIGEST:
+        if source_login is None:
+            raise ServiceValidationError(
+                "Digest auth requires URL credentials or url_auth_login/url_auth_password"
+            )
+        challenge_resp = await session.get(
+            normalized_url,
+            headers=default_headers,
+            timeout=req_timeout,
+            ssl=_request_ssl(disable_ssl),
+        )
+        challenge_header = challenge_resp.headers.get("WWW-Authenticate", "")
+        challenge_map = _parse_digest_challenge(challenge_header)
+        if challenge_resp.status != 401 and not challenge_map:
+            return challenge_resp
+        challenge_resp.release()
+        if not challenge_map:
+            raise ServiceValidationError(
+                "Digest auth challenge was not received from target URL"
+            )
+        parsed = urlparse(normalized_url)
+        digest_uri = parsed.path or "/"
+        if parsed.query:
+            digest_uri = f"{digest_uri}?{parsed.query}"
+        full_uri = normalized_url
+        digest_attempts = [
+            _build_digest_authorization(
+                method="GET",
+                uri=digest_uri,
+                username=source_login,
+                password=source_password,
+                challenge=challenge_map,
+                nc=1,
+                use_qop=True,
+            ),
+            _build_digest_authorization(
+                method="GET",
+                uri=digest_uri,
+                username=source_login,
+                password=source_password,
+                challenge=challenge_map,
+                nc=1,
+                use_qop=False,
+            ),
+            _build_digest_authorization(
+                method="GET",
+                uri=full_uri,
+                username=source_login,
+                password=source_password,
+                challenge=challenge_map,
+                nc=1,
+                use_qop=True,
+            ),
+        ]
+        last_resp: aiohttp.ClientResponse | None = None
+        for idx, digest_header in enumerate(digest_attempts, start=1):
+            headers = dict(default_headers)
+            headers["Authorization"] = digest_header
+            resp = await session.get(
+                normalized_url,
+                headers=headers,
+                timeout=req_timeout,
+                ssl=_request_ssl(disable_ssl),
+            )
+            if resp.status != 401:
+                return resp
+            _LOGGER.debug("Digest auth attempt %s returned 401", idx)
+            if last_resp is not None:
+                last_resp.release()
+            last_resp = resp
+        if last_resp is not None:
+            return last_resp
+        raise ServiceValidationError("Digest auth failed to produce HTTP response")
+
+    raise ServiceValidationError(f"Unsupported url_auth_type: {auth_type}")
 
 
 async def _parse_upload_response(resp: aiohttp.ClientResponse) -> dict[str, Any]:
@@ -254,20 +565,99 @@ def _notify_a161_upload_step2_ok(resp: Any) -> bool:
     return False
 
 
+async def _request_upload_url_json_with_retry(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    headers: dict[str, str],
+    disable_ssl: bool,
+    timeout_s: int,
+    op_label: str,
+) -> dict[str, Any]:
+    """POST upload-url endpoint with retries and UI-visible errors."""
+    delays = list(API_REQUEST_RETRY_DELAYS)
+    max_attempts = 1 + len(delays)
+    for attempt in range(max_attempts):
+        try:
+            async with session.post(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=timeout_s),
+                ssl=_request_ssl(disable_ssl),
+            ) as resp:
+                text = await resp.text()
+                if resp.status == 200:
+                    try:
+                        parsed = json.loads(text) if text.strip() else {}
+                    except json.JSONDecodeError as e:
+                        raise ServiceValidationError(
+                            f"{op_label} returned invalid JSON: {e}"
+                        ) from e
+                    if not isinstance(parsed, dict):
+                        raise ServiceValidationError(
+                            f"{op_label} returned unexpected response payload"
+                        )
+                    return parsed
+
+                if (
+                    resp.status in API_REQUEST_RETRYABLE_STATUSES
+                    and attempt < max_attempts - 1
+                ):
+                    wait_s = delays[attempt]
+                    _LOGGER.warning(
+                        "%s attempt %s/%s failed: status=%s, retry in %ss; body=%s",
+                        op_label,
+                        attempt + 1,
+                        max_attempts,
+                        resp.status,
+                        wait_s,
+                        text[:300],
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+
+                raise ServiceValidationError(
+                    f"{op_label} failed: status={resp.status}, body={text[:300]}"
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            if attempt < max_attempts - 1:
+                wait_s = delays[attempt]
+                _LOGGER.warning(
+                    "%s attempt %s/%s failed (%s), retry in %ss",
+                    op_label,
+                    attempt + 1,
+                    max_attempts,
+                    e,
+                    wait_s,
+                )
+                await asyncio.sleep(wait_s)
+                continue
+            raise ServiceValidationError(f"{op_label} failed after retries: {e}") from e
+
+    raise ServiceValidationError(f"{op_label} failed after retries")
+
+
 async def _async_read_media_body_for_upload(
     hass: HomeAssistant,
     session: aiohttp.ClientSession,
     file_path_or_url: str,
     *,
     as_document: bool,
+    url_auth_type: str | None = None,
+    url_auth_login: str | None = None,
+    url_auth_password: str | None = None,
+    url_auth_token: str | None = None,
     url_basic_auth: str | None = None,
     disable_ssl: bool = False,
 ) -> tuple[bytes, str, str] | None:
     """Скачать по URL или прочитать локальный файл; вернуть (body, content_type, filename)."""
     file_path_or_url = file_path_or_url.strip()
     if file_path_or_url.startswith(("http://", "https://")):
-        file_path_or_url, download_auth = _extract_url_and_basic_auth(
-            file_path_or_url, url_basic_auth
+        sanitized_url, _, _ = _extract_url_auth_source(
+            file_path_or_url,
+            auth_login=url_auth_login,
+            auth_password=url_auth_password,
+            url_basic_auth=url_basic_auth,
         )
         download_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -275,14 +665,79 @@ async def _async_read_media_body_for_upload(
             if as_document
             else "image/webp,image/apng,image/*,*/*;q=0.8",
         }
-        try:
-            async with session.get(
+        if url_auth_type == URL_AUTH_TYPE_DIGEST:
+            _, source_login, source_password = _extract_url_auth_source(
                 file_path_or_url,
-                headers=download_headers,
-                auth=download_auth,
-                timeout=aiohttp.ClientTimeout(total=FILE_DOWNLOAD_TIMEOUT),
-                ssl=_request_ssl(disable_ssl),
-            ) as r:
+                auth_login=url_auth_login,
+                auth_password=url_auth_password,
+                url_basic_auth=url_basic_auth,
+            )
+            if source_login is None:
+                raise ServiceValidationError(
+                    "Digest auth requires URL credentials or url_auth_login/url_auth_password"
+                )
+            try:
+                status, response_headers, body = await hass.async_add_executor_job(
+                    functools.partial(
+                        _download_http_media_digest_requests,
+                        sanitized_url,
+                        download_headers,
+                        source_login,
+                        source_password,
+                        disable_ssl=disable_ssl,
+                        timeout_s=FILE_DOWNLOAD_TIMEOUT,
+                    )
+                )
+            except Exception as e:
+                _LOGGER.error("Download media failed: %s", e)
+                return None
+            if status != 200:
+                _LOGGER.error("Download media failed: status=%s", status)
+                return None
+            raw_ct = response_headers.get("Content-Type") or ""
+            if as_document:
+                if ";" in raw_ct:
+                    raw_ct = raw_ct.split(";", 1)[0].strip().lower()
+                elif raw_ct:
+                    raw_ct = raw_ct.strip().lower()
+                if raw_ct and "/" in raw_ct:
+                    content_type = raw_ct
+                else:
+                    content_type = (
+                        mimetypes.guess_type(sanitized_url)[0]
+                        or "application/octet-stream"
+                    )
+                filename = _filename_from_url(sanitized_url) or "file"
+                filename = _filename_with_content_type(filename, content_type)
+            else:
+                if "image/" in raw_ct:
+                    content_type = raw_ct.split(";")[0].strip().lower()
+                else:
+                    content_type = _content_type_from_path(sanitized_url)
+                filename = _filename_from_url(sanitized_url) or "image"
+                if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+                    ext = _ext_from_content_type(content_type)
+                    filename = f"{filename}.{ext}" if ext else f"{filename}.jpg"
+            _LOGGER.debug(
+                "Downloaded media from URL via requests digest: %d bytes, content_type=%s",
+                len(body),
+                content_type,
+            )
+            return body, content_type, filename
+        try:
+            response = await _download_http_media(
+                session,
+                file_path_or_url,
+                disable_ssl=disable_ssl,
+                as_document=as_document,
+                auth_type=url_auth_type,
+                auth_login=url_auth_login,
+                auth_password=url_auth_password,
+                auth_token=url_auth_token,
+                url_basic_auth=url_basic_auth,
+                timeout_s=FILE_DOWNLOAD_TIMEOUT,
+            )
+            async with response as r:
                 if r.status != 200:
                     _LOGGER.error("Download media failed: status=%s", r.status)
                     return None
@@ -296,16 +751,17 @@ async def _async_read_media_body_for_upload(
                         content_type = raw_ct
                     else:
                         content_type = (
-                            mimetypes.guess_type(file_path_or_url)[0]
+                            mimetypes.guess_type(sanitized_url)[0]
                             or "application/octet-stream"
                         )
-                    filename = _filename_from_url(file_path_or_url) or "file"
+                    filename = _filename_from_url(sanitized_url) or "file"
+                    filename = _filename_with_content_type(filename, content_type)
                 else:
                     if "image/" in raw_ct:
                         content_type = raw_ct.split(";")[0].strip().lower()
                     else:
-                        content_type = _content_type_from_path(file_path_or_url)
-                    filename = _filename_from_url(file_path_or_url) or "image"
+                        content_type = _content_type_from_path(sanitized_url)
+                    filename = _filename_from_url(sanitized_url) or "image"
                     if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
                         ext = _ext_from_content_type(content_type)
                         filename = f"{filename}.{ext}" if ext else f"{filename}.jpg"
@@ -429,7 +885,7 @@ async def _post_message_with_retry(
     async def _inner() -> bool:
         last_error: str | None = None
         n = len(retry_delays) + 1 if count_requests is None else count_requests
-        n = max(n, len(_NETWORK_RETRY_DELAYS) + 1)
+        n = max(n, len(API_REQUEST_RETRY_DELAYS) + 1)
         for attempt in range(n):
             try:
                 async with session.post(
@@ -475,9 +931,9 @@ async def _post_message_with_retry(
                 last_error = str(e)
                 if attempt < n - 1:
                     delay = (
-                        _NETWORK_RETRY_DELAYS[attempt]
-                        if attempt < len(_NETWORK_RETRY_DELAYS)
-                        else _NETWORK_RETRY_DELAYS[-1]
+                        API_REQUEST_RETRY_DELAYS[attempt]
+                        if attempt < len(API_REQUEST_RETRY_DELAYS)
+                        else API_REQUEST_RETRY_DELAYS[-1]
                     )
                     _LOGGER.warning(
                         "Max API send %s request failed (attempt %s/%s): %s; retry in %ss",
@@ -931,6 +1387,10 @@ async def upload_image_and_send(
     count_requests: int | None = None,
     notify: bool = True,
     disable_ssl: bool = False,
+    url_auth_type: str | None = None,
+    url_auth_login: str | None = None,
+    url_auth_password: str | None = None,
+    url_auth_token: str | None = None,
     url_basic_auth: str | None = None,
 ) -> None:
     """Upload image/file to Max (POST /uploads) and send (POST /messages)."""
@@ -940,7 +1400,10 @@ async def upload_image_and_send(
         return
     result = await _get_message_url_and_recipient(hass, entry, token, recipient)
     if not result:
-        _LOGGER.error("Could not resolve recipient for photo")
+        _LOGGER.error(
+            "Could not resolve recipient for %s",
+            "document" if as_document else "photo",
+        )
         return
     msg_url, _ = result
 
@@ -955,6 +1418,10 @@ async def upload_image_and_send(
             session,
             file_path_or_url,
             as_document=as_document,
+            url_auth_type=url_auth_type,
+            url_auth_login=url_auth_login,
+            url_auth_password=url_auth_password,
+            url_auth_token=url_auth_token,
             url_basic_auth=url_basic_auth,
             disable_ssl=disable_ssl,
         )
@@ -978,44 +1445,17 @@ async def upload_image_and_send(
         upload_req_url = (
             f"{_api_base_url_for_entry(entry)}{API_PATH_UPLOADS}?type={upload_type}"
         )
-        try:
-            async with session.post(
-                upload_req_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-                ssl=_request_ssl(disable_ssl),
-            ) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    _LOGGER.error(
-                        "notify.a161.ru upload URL failed: status=%s body=%s",
-                        resp.status,
-                        text[:500],
-                    )
-                    return
-                try:
-                    parsed = json.loads(text) if text.strip() else {}
-                except json.JSONDecodeError as e:
-                    _LOGGER.error(
-                        "notify.a161.ru upload URL bad JSON: %s body=%s",
-                        e,
-                        text[:500],
-                    )
-                    return
-                if not isinstance(parsed, dict):
-                    _LOGGER.error(
-                        "notify.a161.ru upload URL expected object, got: %s",
-                        text[:500],
-                    )
-                    return
-                data = parsed
-        except aiohttp.ClientError as e:
-            _LOGGER.error("notify.a161.ru upload URL request failed: %s", e)
-            return
+        data = await _request_upload_url_json_with_retry(
+            session,
+            upload_req_url,
+            headers=headers,
+            disable_ssl=disable_ssl,
+            timeout_s=15,
+            op_label="notify.a161.ru upload URL request",
+        )
         upload_url = data.get("url")
         if not upload_url:
-            _LOGGER.error("notify.a161.ru upload response has no url: %s", data)
-            return
+            raise ServiceValidationError("notify.a161.ru upload response has no url")
         try:
             form = aiohttp.FormData()
             form.add_field("data", body, filename=filename, content_type=content_type)
@@ -1083,32 +1523,28 @@ async def upload_image_and_send(
         return
 
     upload_req_url = f"{_api_base_url_for_entry(entry)}{API_PATH_UPLOADS}?type={upload_type}&v={API_VERSION}"
-    try:
-        async with session.post(
-            upload_req_url,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=10),
-            ssl=_request_ssl(disable_ssl),
-        ) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                _LOGGER.error("Max API upload URL failed: status=%s body=%s", resp.status, text[:300])
-                return
-            data = await resp.json()
-    except (aiohttp.ClientError, ValueError) as e:
-        _LOGGER.error("Max API upload URL request failed: %s", e)
-        return
+    data = await _request_upload_url_json_with_retry(
+        session,
+        upload_req_url,
+        headers=headers,
+        disable_ssl=disable_ssl,
+        timeout_s=10,
+        op_label="Max API upload URL request",
+    )
 
     upload_url = data.get("url")
     if not upload_url:
-        _LOGGER.error("Max API upload response has no url: %s", data)
-        return
+        raise ServiceValidationError("Max API upload response has no url")
 
     read_out = await _async_read_media_body_for_upload(
         hass,
         session,
         file_path_or_url,
         as_document=as_document,
+        url_auth_type=url_auth_type,
+        url_auth_login=url_auth_login,
+        url_auth_password=url_auth_password,
+        url_auth_token=url_auth_token,
         url_basic_auth=url_basic_auth,
         disable_ssl=disable_ssl,
     )
@@ -1183,7 +1619,7 @@ async def upload_image_and_send(
         headers,
         payload,
         FILE_READY_RETRY_DELAYS,
-        "Photo",
+        "Document" if as_document else "Photo",
         count_requests,
         on_success=_on_success,
         disable_ssl=disable_ssl,
@@ -1200,6 +1636,10 @@ async def upload_video_and_send(
     count_requests: int | None = None,
     notify: bool = True,
     disable_ssl: bool = False,
+    url_auth_type: str | None = None,
+    url_auth_login: str | None = None,
+    url_auth_password: str | None = None,
+    url_auth_token: str | None = None,
     url_basic_auth: str | None = None,
 ) -> None:
     """Upload video to Max (POST /uploads?type=video) and send (POST /messages)."""
@@ -1215,85 +1655,57 @@ async def upload_video_and_send(
 
     session = async_get_clientsession(hass)
     headers = {"Authorization": token}
+    _ = notify
 
     upload_url: str | None = None
     video_token: str | None = None
 
     if is_notify_a161_entry(entry):
         upload_req_url = f"{_api_base_url_for_entry(entry)}{API_PATH_UPLOADS}?type=video"
-        try:
-            async with session.post(
-                upload_req_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-                ssl=_request_ssl(disable_ssl),
-            ) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    _LOGGER.error(
-                        "notify.a161.ru video upload URL failed: status=%s body=%s",
-                        resp.status,
-                        text[:500],
-                    )
-                    return
-                try:
-                    parsed = json.loads(text) if text.strip() else {}
-                except json.JSONDecodeError as e:
-                    _LOGGER.error(
-                        "notify.a161.ru video upload URL bad JSON: %s body=%s",
-                        e,
-                        text[:500],
-                    )
-                    return
-                if not isinstance(parsed, dict):
-                    _LOGGER.error(
-                        "notify.a161.ru video upload URL expected object: %s",
-                        text[:500],
-                    )
-                    return
-                data = parsed
-        except aiohttp.ClientError as e:
-            _LOGGER.error("notify.a161.ru video upload URL request failed: %s", e)
-            return
+        data = await _request_upload_url_json_with_retry(
+            session,
+            upload_req_url,
+            headers=headers,
+            disable_ssl=disable_ssl,
+            timeout_s=15,
+            op_label="notify.a161.ru video upload URL request",
+        )
         upload_url = data.get("url")
         video_token = data.get("token")
         if not upload_url or not video_token:
-            _LOGGER.error("notify.a161.ru video step1 needs url and token: %s", data)
-            return
+            raise ServiceValidationError(
+                "notify.a161.ru video upload response must contain url and token"
+            )
     else:
         upload_req_url = f"{_api_base_url_for_entry(entry)}{API_PATH_UPLOADS}?type=video&v={API_VERSION}"
-        try:
-            async with session.post(
-                upload_req_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-                ssl=_request_ssl(disable_ssl),
-            ) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    _LOGGER.error("Max API upload URL failed: status=%s body=%s", resp.status, text[:300])
-                    return
-                data = await resp.json()
-        except (aiohttp.ClientError, ValueError) as e:
-            _LOGGER.error("Max API upload URL request failed: %s", e)
-            return
+        data = await _request_upload_url_json_with_retry(
+            session,
+            upload_req_url,
+            headers=headers,
+            disable_ssl=disable_ssl,
+            timeout_s=15,
+            op_label="Max API video upload URL request",
+        )
 
         upload_url = data.get("url")
         if not upload_url:
-            _LOGGER.error("Max API upload response has no url: %s", data)
-            return
+            raise ServiceValidationError("Max API upload response has no url")
 
         video_token = data.get("token")
         if not video_token:
-            _LOGGER.error("Max API upload response has no token (required for video): %s", data)
-            return
+            raise ServiceValidationError(
+                "Max API upload response has no token (required for video)"
+            )
 
     file_path_or_url = file_path_or_url.strip()
     content_type = "video/mp4"
     filename = "video.mp4"
     if file_path_or_url.startswith(("http://", "https://")):
-        file_path_or_url, download_auth = _extract_url_and_basic_auth(
-            file_path_or_url, url_basic_auth
+        sanitized_url, _, _ = _extract_url_auth_source(
+            file_path_or_url,
+            auth_login=url_auth_login,
+            auth_password=url_auth_password,
+            url_basic_auth=url_basic_auth,
         )
         delays = list(VIDEO_URL_DOWNLOAD_RETRY_DELAYS)
         max_attempts = 1 + len(delays)
@@ -1303,19 +1715,26 @@ async def upload_video_and_send(
         try:
             for attempt in range(max_attempts):
                 try:
-                    async with session.get(
+                    response = await _download_http_media(
+                        session,
                         file_path_or_url,
-                        auth=download_auth,
-                        timeout=aiohttp.ClientTimeout(total=120),
-                        ssl=_request_ssl(disable_ssl),
-                    ) as r:
+                        disable_ssl=disable_ssl,
+                        as_document=True,
+                        auth_type=url_auth_type,
+                        auth_login=url_auth_login,
+                        auth_password=url_auth_password,
+                        auth_token=url_auth_token,
+                        url_basic_auth=url_basic_auth,
+                        timeout_s=120,
+                    )
+                    async with response as r:
                         if r.status == 200:
                             raw_ct = r.headers.get("Content-Type") or ""
                             if "video/" in raw_ct:
                                 content_type = raw_ct.split(";")[0].strip().lower()
                             else:
-                                content_type = _content_type_from_path_video(file_path_or_url)
-                            filename = _filename_from_url(file_path_or_url) or "video"
+                                content_type = _content_type_from_path_video(sanitized_url)
+                            filename = _filename_from_url(sanitized_url) or "video"
                             if not any(
                                 filename.lower().endswith(ext)
                                 for ext in _VIDEO_EXT_TO_CONTENT_TYPE

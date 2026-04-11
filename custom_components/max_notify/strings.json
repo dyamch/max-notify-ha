@@ -30,11 +30,11 @@
         },
         "chat_id": {
           "name": "Chat ID (deprecated)",
-          "description": "Deprecated: prefer using recipient_id for both personal chats and groups. Chat ID: positive — personal chat (User ID), negative — group."
+          "description": "Deprecated: prefer using recipient_id for both personal chats and groups. Chat ID: positive — personal chat (User ID), negative — group. Will be removed in version 1.5.0."
         },
         "user_id": {
           "name": "User ID (deprecated)",
-          "description": "Deprecated: prefer using recipient_id. User ID for personal chat (alternative to positive chat_id)."
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat (alternative to positive chat_id). Will be removed in version 1.5.0."
         },
         "buttons": {
           "name": "Buttons",
@@ -74,16 +74,36 @@
           "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
         },
         "chat_id": {
-          "name": "Chat ID",
-          "description": "Chat ID: positive — personal, negative — group."
+          "name": "Chat ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. Chat ID: positive — personal, negative — group. Will be removed in version 1.5.0."
         },
         "user_id": {
-          "name": "User ID",
-          "description": "User ID for personal chat."
+          "name": "User ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat. Will be removed in version 1.5.0."
         },
         "disable_ssl": {
           "name": "Disable SSL verification",
           "description": "Disables SSL certificate validation for this operation. Use only for endpoints with self-signed or invalid certificates."
+        },
+        "url_auth_type": {
+          "name": "URL auth type",
+          "description": "Authentication type for media URL download: basic, digest or bearer. Required when URL or parameters include credentials."
+        },
+        "url_auth_login": {
+          "name": "URL auth login",
+          "description": "Login for basic or digest auth."
+        },
+        "url_auth_password": {
+          "name": "URL auth password",
+          "description": "Password for basic or digest auth."
+        },
+        "url_auth_token": {
+          "name": "URL auth token",
+          "description": "Token for bearer auth."
+        },
+        "url_basic_auth": {
+          "name": "Basic auth for file URL (deprecated)",
+          "description": "Deprecated. Use url_auth_type=basic with url_auth_login/url_auth_password. Legacy format: login:password. Will be removed in version 1.5.0."
         },
         "count_requests": {
           "name": "Count requests",
@@ -131,16 +151,36 @@
           "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
         },
         "chat_id": {
-          "name": "Chat ID",
-          "description": "Chat ID: positive — personal, negative — group."
+          "name": "Chat ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. Chat ID: positive — personal, negative — group. Will be removed in version 1.5.0."
         },
         "user_id": {
-          "name": "User ID",
-          "description": "User ID for personal chat."
+          "name": "User ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat. Will be removed in version 1.5.0."
         },
         "disable_ssl": {
           "name": "Disable SSL verification",
           "description": "Disables SSL certificate validation for this operation. Use only for endpoints with self-signed or invalid certificates."
+        },
+        "url_auth_type": {
+          "name": "URL auth type",
+          "description": "Authentication type for media URL download: basic, digest or bearer. Required when URL or parameters include credentials."
+        },
+        "url_auth_login": {
+          "name": "URL auth login",
+          "description": "Login for basic or digest auth."
+        },
+        "url_auth_password": {
+          "name": "URL auth password",
+          "description": "Password for basic or digest auth."
+        },
+        "url_auth_token": {
+          "name": "URL auth token",
+          "description": "Token for bearer auth."
+        },
+        "url_basic_auth": {
+          "name": "Basic auth for file URL (deprecated)",
+          "description": "Deprecated. Use url_auth_type=basic with url_auth_login/url_auth_password. Legacy format: login:password. Will be removed in version 1.5.0."
         },
         "count_requests": {
           "name": "Count requests",
@@ -188,16 +228,36 @@
           "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
         },
         "chat_id": {
-          "name": "Chat ID",
-          "description": "Chat ID: positive — personal, negative — group."
+          "name": "Chat ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. Chat ID: positive — personal, negative — group. Will be removed in version 1.5.0."
         },
         "user_id": {
-          "name": "User ID",
-          "description": "User ID for personal chat."
+          "name": "User ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat. Will be removed in version 1.5.0."
         },
         "disable_ssl": {
           "name": "Disable SSL verification",
           "description": "Disables SSL certificate validation for this operation. Use only for endpoints with self-signed or invalid certificates."
+        },
+        "url_auth_type": {
+          "name": "URL auth type",
+          "description": "Authentication type for media URL download: basic, digest or bearer. Required when URL or parameters include credentials."
+        },
+        "url_auth_login": {
+          "name": "URL auth login",
+          "description": "Login for basic or digest auth."
+        },
+        "url_auth_password": {
+          "name": "URL auth password",
+          "description": "Password for basic or digest auth."
+        },
+        "url_auth_token": {
+          "name": "URL auth token",
+          "description": "Token for bearer auth."
+        },
+        "url_basic_auth": {
+          "name": "Basic auth for file URL (deprecated)",
+          "description": "Deprecated. Use url_auth_type=basic with url_auth_login/url_auth_password. Legacy format: login:password. Will be removed in version 1.5.0."
         },
         "count_requests": {
           "name": "Count requests",
@@ -237,12 +297,12 @@
           "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
         },
         "chat_id": {
-          "name": "Chat ID",
-          "description": "Chat ID: positive — personal, negative — group."
+          "name": "Chat ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. Chat ID: positive — personal, negative — group. Will be removed in version 1.5.0."
         },
         "user_id": {
-          "name": "User ID",
-          "description": "User ID for personal chat."
+          "name": "User ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat. Will be removed in version 1.5.0."
         },
         "config_entry_id": {
           "name": "Integration",
@@ -287,12 +347,12 @@
           "description": "Universal recipient ID: positive — personal chat (User ID), negative — group (Chat ID)."
         },
         "chat_id": {
-          "name": "Chat ID",
-          "description": "Chat ID: positive — personal, negative — group."
+          "name": "Chat ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. Chat ID: positive — personal, negative — group. Will be removed in version 1.5.0."
         },
         "user_id": {
-          "name": "User ID",
-          "description": "User ID for personal chat."
+          "name": "User ID (deprecated)",
+          "description": "Deprecated: prefer using recipient_id. User ID for personal chat. Will be removed in version 1.5.0."
         },
         "config_entry_id": {
           "name": "Integration",

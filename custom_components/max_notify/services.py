@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID
@@ -23,6 +24,10 @@ from .const import (
     CONF_CONFIG_ENTRY_ID,
     CONF_COUNT_REQUESTS,
     CONF_DISABLE_SSL,
+    CONF_URL_AUTH_LOGIN,
+    CONF_URL_AUTH_PASSWORD,
+    CONF_URL_AUTH_TOKEN,
+    CONF_URL_AUTH_TYPE,
     CONF_URL_BASIC_AUTH,
     CONF_MESSAGE_ID,
     CONF_RECIPIENT_ID,
@@ -36,6 +41,9 @@ from .const import (
     SERVICE_SEND_MESSAGE,
     SERVICE_SEND_PHOTO,
     SERVICE_SEND_VIDEO,
+    URL_AUTH_TYPE_BASIC,
+    URL_AUTH_TYPE_BEARER,
+    URL_AUTH_TYPE_DIGEST,
 )
 from .helpers import is_notify_a161_entry
 from .schemas import (
@@ -48,6 +56,72 @@ from .schemas import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _has_url_userinfo(file_path_or_url: str) -> bool:
+    """Return True when URL has user:pass@host part."""
+    parsed = urlparse(file_path_or_url)
+    return parsed.username is not None
+
+
+def _normalize_url_auth_data(
+    data: dict[str, Any], file_path_or_url: str
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Validate and normalize URL auth service fields."""
+    auth_type_raw = data.get(CONF_URL_AUTH_TYPE)
+    auth_type = str(auth_type_raw).strip().lower() if auth_type_raw is not None else None
+    auth_login_raw = data.get(CONF_URL_AUTH_LOGIN)
+    auth_password_raw = data.get(CONF_URL_AUTH_PASSWORD)
+    auth_token_raw = data.get(CONF_URL_AUTH_TOKEN)
+    auth_login = str(auth_login_raw).strip() if auth_login_raw is not None else None
+    auth_password = (
+        str(auth_password_raw).strip() if auth_password_raw is not None else None
+    )
+    auth_token = str(auth_token_raw).strip() if auth_token_raw is not None else None
+    url_basic_auth = data.get(CONF_URL_BASIC_AUTH)
+
+    has_url_credentials = file_path_or_url.startswith(("http://", "https://")) and _has_url_userinfo(file_path_or_url)
+    has_basic_pair = bool(auth_login) or bool(auth_password) or bool(url_basic_auth)
+    has_token = bool(auth_token)
+    any_auth_input = has_url_credentials or has_basic_pair or has_token
+
+    if any_auth_input and not auth_type:
+        raise ServiceValidationError(
+            "url_auth_type is required when URL credentials or auth parameters are provided. "
+            "Set url_auth_type to one of: basic, digest, bearer."
+        )
+
+    if auth_type is None:
+        return None, None, None, None
+
+    if auth_type == URL_AUTH_TYPE_BEARER:
+        if not auth_token:
+            raise ServiceValidationError(
+                "url_auth_token is required when url_auth_type is bearer"
+            )
+    else:
+        if auth_token:
+            raise ServiceValidationError(
+                "url_auth_token can only be used with url_auth_type=bearer"
+            )
+
+    if auth_type in (URL_AUTH_TYPE_BASIC, URL_AUTH_TYPE_DIGEST):
+        if bool(auth_login) ^ bool(auth_password):
+            raise ServiceValidationError(
+                "Both url_auth_login and url_auth_password must be set together"
+            )
+        if auth_type == URL_AUTH_TYPE_DIGEST and url_basic_auth:
+            raise ServiceValidationError(
+                "url_basic_auth is supported only with url_auth_type=basic"
+            )
+    else:
+        if auth_login or auth_password or url_basic_auth:
+            raise ServiceValidationError(
+                "url_auth_login, url_auth_password and url_basic_auth can only be used with "
+                "url_auth_type=basic or url_auth_type=digest"
+            )
+
+    return auth_type, auth_login, auth_password, auth_token
 
 
 def _raise_notify_unsupported(operation: str) -> None:
@@ -632,6 +706,9 @@ async def _send_photo_or_document(
     send_kb = data.get(CONF_SEND_KEYBOARD, True)
     buttons_provided = "buttons" in data
     count_requests = data.get(CONF_COUNT_REQUESTS)
+    auth_type, auth_login, auth_password, auth_token = _normalize_url_auth_data(
+        data, file_path_or_url
+    )
     url_basic_auth = data.get(CONF_URL_BASIC_AUTH)
     entity_ids = data.get(ATTR_ENTITY_ID)
     config_entry_id = data.get(CONF_CONFIG_ENTRY_ID)
@@ -665,7 +742,8 @@ async def _send_photo_or_document(
 
     _LOGGER.debug(
         "_send_photo_or_document: as_document=%s, file=%s, caption_present=%s, "
-        "entity_ids=%s, config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, disable_ssl=%s, buttons_present=%s",
+        "entity_ids=%s, config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, "
+        "disable_ssl=%s, auth_type=%s, buttons_present=%s",
         as_document,
         file_path_or_url,
         bool(caption),
@@ -675,6 +753,7 @@ async def _send_photo_or_document(
         user_ids,
         count_requests,
         disable_ssl,
+        auth_type,
         buttons_provided,
     )
 
@@ -721,6 +800,10 @@ async def _send_photo_or_document(
             buttons=all_buttons,
             count_requests=count_requests,
             disable_ssl=disable_ssl,
+            url_auth_type=auth_type,
+            url_auth_login=auth_login,
+            url_auth_password=auth_password,
+            url_auth_token=auth_token,
             url_basic_auth=url_basic_auth,
             # notify=data.get("notify", True),  # отключено: Max не отключает push/звук
         )
@@ -751,6 +834,9 @@ async def _send_video(
     user_id = data.get(CONF_USER_ID)
     recipient_id = data.get(CONF_RECIPIENT_ID)
     count_requests = data.get(CONF_COUNT_REQUESTS)
+    auth_type, auth_login, auth_password, auth_token = _normalize_url_auth_data(
+        data, file_path_or_url
+    )
     url_basic_auth = data.get(CONF_URL_BASIC_AUTH)
 
     chat_ids = _normalize_target_ids(chat_id) if chat_id is not None else None
@@ -779,7 +865,7 @@ async def _send_video(
 
     _LOGGER.debug(
         "_send_video: file=%s, caption_present=%s, entity_ids=%s, "
-        "config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, disable_ssl=%s, url_basic_auth_present=%s, buttons_present=%s",
+        "config_entry_id=%s, chat_ids=%s, user_ids=%s, count_requests=%s, disable_ssl=%s, auth_type=%s, buttons_present=%s",
         file_path_or_url,
         bool(caption),
         entity_ids,
@@ -788,7 +874,7 @@ async def _send_video(
         user_ids,
         count_requests,
         disable_ssl,
-        bool(url_basic_auth),
+        auth_type,
         buttons_provided,
     )
 
@@ -834,6 +920,10 @@ async def _send_video(
             buttons=all_buttons,
             count_requests=count_requests,
             disable_ssl=disable_ssl,
+            url_auth_type=auth_type,
+            url_auth_login=auth_login,
+            url_auth_password=auth_password,
+            url_auth_token=auth_token,
             url_basic_auth=url_basic_auth,
             # notify=data.get("notify", True),  # отключено: Max не отключает push/звук
         )
