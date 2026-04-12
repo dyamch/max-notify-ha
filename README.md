@@ -2,14 +2,50 @@
   <img src=".images/logo.png" alt="MaxNotify" width="480">
 </p>
 
+<a id="readme-top"></a>
+
 # MaxNotify — интеграция с мессенджером Max для Home Assistant
 
 Отправка и приём сообщений в мессенджере **Max** через официальный API (platform-api.max.ru).
+
+<a id="содержание"></a>
+
+## Содержание
+
+- [Присоединяйтесь к сообществу](#community)
+- [Важная информация](#important)
+  - [Поддержка `notify.a161.ru`](#notify-a161)
+- [Возможности](#features)
+- [Требования](#requirements)
+- [Установка](#install)
+- [Настройка](#configure)
+  - [Официальный API](#configure-official)
+  - [Сервис `notify.a161.ru`](#configure-a161)
+- [Приём сообщений](#receiving)
+  - [WebHook и HTTPS](#webhook-https)
+  - [Данные события](#event-data)
+  - [Групповые чаты](#group-chats)
+  - [Пример: ответ в тот же чат](#example-reply)
+  - [Пример: нажатие кнопки](#example-button)
+- [Кнопки клавиатуры](#keyboard)
+- [Сервисы](#services)
+  - [`max_notify.send_message`](#service-send-message)
+  - [`max_notify.send_photo`](#service-send-photo)
+  - [`max_notify.send_document`](#service-send-document)
+  - [`max_notify.send_video`](#service-send-video)
+  - [`max_notify.delete_message`](#service-delete-message)
+  - [`max_notify.edit_message`](#service-edit-message)
+- [Включение режима отладки](#debug)
+- [Токен и ID](#token-ids)
+- [Ссылки](#links)
+
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
 [![GitHub](https://img.shields.io/badge/GitHub-kai--zer--ru%2Fmax--notify--ha-blue?logo=github)](https://github.com/kai-zer-ru/max-notify-ha)
 [![Donate](https://img.shields.io/badge/donate-Tinkoff-FFDD2D.svg)](https://www.tbank.ru/rm/r_wKLcbFgjYa.ncgWMwrHSA/vyQvd5941/)
 ---
+
+<a id="community"></a>
 
 # 📣 Присоединяйтесь к сообществу
 
@@ -21,13 +57,21 @@
 
 - **Канал в Dzen** - [kai_zer_ru](https://dzen.ru/kai_zer_ru)
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="important"></a>
 
 # ⚠️ Важная информация
 
 В данный момент регистрация на платформе разработчиков MAX доступна только индивидуальным предпринимателям и организациям. То есть юридическим лицам. Это ограничение самой платформы. К интеграции это отношения не имеет. Надеемся, что в ближайшем будущем эту процедуру упростят.
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="notify-a161"></a>
 
 ### 🔗 Поддержка `notify.a161.ru` (важно)
 
@@ -46,8 +90,12 @@
 - Между **успешными** исходящими сообщениями для одной записи интеграции выдерживается пауза **1 с** (снижает нагрузку при серии быстрых вызовов из автоматизаций).
 - Режим приёма сообщений (Polling/WebHook) и прочие расширенные возможности официального API Max в этом режиме недоступны.
 
+[↑ Наверх](#readme-top)
 
 ---
+
+<a id="features"></a>
+
 ## ✨ Возможности
 
 - **Отправка:** текст, фото, документы, видео в чаты Max (сервисы и сущности `notify`).
@@ -57,15 +105,22 @@
 
 Для режима `notify.a161.ru` доступны те же основные сервисы отправки (текст, фото, документ, видео, удаление, правка), но **без кнопок** и **без приёма** сообщений; подробнее — в блоке про `notify.a161.ru` выше. Остальные пункты в списке ниже в основном относятся к `platform-api.max.ru`.
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="requirements"></a>
 
 ## 📋 Требования
 
 - Home Assistant (актуальная версия).
 - Бот в Max и **токен** из раздела [Интеграция](https://business.max.ru/self/#/chat-bots) платформы Max для разработчиков, либо `user_id` и токен, выданные сервисным ботом `@id6162049515_1_bot` для режима `notify.a161.ru`.
 
+[↑ Наверх](#readme-top)
 
 ---
+
+<a id="install"></a>
 
 ## 🔧 Установка
 
@@ -75,9 +130,15 @@
 
 Добавить интеграцию: **Настройки** → **Устройства и службы** → **Добавить интеграцию** → **MaxNotify**.
 
+[↑ Наверх](#readme-top)
+
 ---
 
+<a id="configure"></a>
+
 ## ⚙️ Настройка
+
+<a id="configure-official"></a>
 
 ### 1) 🌐 Официальный API (`platform-api.max.ru`)
 
@@ -92,6 +153,10 @@
 
 После сохранения появятся сущности `notify.max_...` и сервисы `max_notify.send_message`, `send_photo`, `send_document`, `send_video`.
 
+[↑ Наверх](#readme-top)
+
+<a id="configure-a161"></a>
+
 ### 2) 🚪 Сервис `notify.a161.ru`
 
 1. **Тип интеграции** — выберите «notify.a161.ru (text-only self notifications)».
@@ -104,7 +169,11 @@
 Доступны сервисы: `send_message`, `send_photo`, `send_document`, **`send_video`**, **`delete_message`**, **`edit_message`** (медиа и лимиты — см. выше). Кнопки к сообщениям интеграция **не передаёт** в API (`buttons` / `send_keyboard` игнорируются для этого режима).
 Если нужно сменить `user_id`, рекомендуется удалить и заново добавить интеграцию с новым токеном/`user_id`.
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="receiving"></a>
 
 ## 📥 Приём сообщений
 
@@ -117,6 +186,10 @@
 - **Long Polling** — опрос API Max, доступ из интернета к HA не нужен.
 - **WebHook** — Max шлёт запросы на URL вашего Home Assistant по **HTTPS**. Нужен **внешний** URL инстанса (не локальный `http://192.168…`), иначе регистрация вебхука в Max не выполнится. Задайте его в **Настройки → Система → Сеть** — см. [официальную документацию Home Assistant про URL инстанса](https://www.home-assistant.io/docs/configuration/basic/). Подойдут Nabu Casa, reverse proxy с TLS или другой публичный HTTPS-адрес. В карточке интеграции показывается итоговый URL вебхука; опционально задаётся секрет (заголовок `X-Max-Bot-Api-Secret`).
 
+[↑ Наверх](#readme-top)
+
+<a id="webhook-https"></a>
+
 #### WebHook и HTTPS: как это устроено
 
 - **Почему важен именно внешний адрес.** Серверы Max должны достучаться до вашего Home Assistant из интернета. Одного «локального» HTTPS в поле **Внутренний URL** недостаточно: интеграция ориентируется на то, можно ли собрать **внешний** HTTPS-адрес для вебхука (как при регистрации в Max). Если вы отключили HTTPS на reverse proxy или сменили схему доступа, **обновите и поля в разделе «Сеть»** — иначе в конфиге может остаться старый `https://…`, и Home Assistant будет считать, что всё в порядке.
@@ -128,6 +201,10 @@
 По [документации Max](https://dev.max.ru/docs-api/methods/POST/subscriptions), пока для бота активна **подписка WebHook** (POST `/subscriptions`), **Long Polling не работает**. В настройках интеграции пункт Long Polling **скрыт**, пока выбран режим WebHook (сначала переключитесь на «Только отправка», чтобы снять регистрацию WebHook). При выборе Long Polling интеграция запрашивает список подписок в Max и **снимает** их через API, чтобы опрос мог работать.
 
 Если в Home Assistant добавлено **несколько** интеграций MaxNotify с **одним и тем же** токеном бота, одновременно нельзя настроить **Long Polling** в одной записи и **WebHook** в другой: при добавлении новой интеграции конфликтующий режим скрыт в мастере, а при сохранении настроек показывается ошибка. **В той же записи** режим по-прежнему можно сменить (например с Long Polling на WebHook или наоборот) — текущая запись при проверке исключается.
+
+[↑ Наверх](#readme-top)
+
+<a id="event-data"></a>
 
 ### 📦 Данные события
 
@@ -147,6 +224,10 @@
 
 Для автоматизаций рекомендуется использовать **`recipient_id`** (и в триггерах, и в сервисах) — это тот же ID, который вы указываете в «Добавить чат». Поля `chat_id` и `user_id` оставлены для совместимости и низкоуровневых сценариев, но будут удалены в версии **1.5.0**.
 
+[↑ Наверх](#readme-top)
+
+<a id="group-chats"></a>
+
 ### 🧩 Групповые чаты
 
 Чтобы получать сообщения из **группы**:
@@ -155,6 +236,10 @@
 3. Добавьте чат в интеграции с **отрицательным** ID (как в событии).
 
 Личный чат и группа различаются по `recipient_id`: **отрицательный** — группа (Chat ID), **положительный** — личный чат (User ID).
+
+[↑ Наверх](#readme-top)
+
+<a id="example-reply"></a>
 
 ### 💬 Пример: ответ в тот же чат на команду
 
@@ -173,6 +258,10 @@ action:
       message: "Привет!"
       send_keyboard: true
 ```
+
+[↑ Наверх](#readme-top)
+
+<a id="example-button"></a>
 
 ### 🔘 Пример: реакция на нажатие кнопки
 
@@ -196,7 +285,11 @@ action:
 
 В автоматизациях используйте триггер «Событие» с типом `max_notify_received` и при необходимости фильтр по `command`, `callback_data`, `chat_id` или `config_entry_id`. Отладка: Инструменты разработчика → События → подписка на `max_notify_received`.
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="keyboard"></a>
 
 ## 🎛️ Кнопки клавиатуры
 
@@ -230,12 +323,18 @@ data:
         url: "https://example.com"
 ```
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="services"></a>
 
 ## 🛠️ Сервисы
 
 Полный набор готовых YAML-примеров для всех сервисов (вручную и из `max_notify_received`) вынесен в отдельный файл:  
-[`AUTOMATIONS.md`](AUTOMATIONS.md)
+[`AUTOMATIONS.md` (содержание)](AUTOMATIONS.md#содержание)
+
+<a id="service-send-message"></a>
 
 ### 📨 max_notify.send_message
 
@@ -258,6 +357,10 @@ data:
   title: "Заголовок"
 ```
 
+[↑ Наверх](#readme-top)
+
+<a id="service-send-photo"></a>
+
 ### 🖼️ max_notify.send_photo
 
 Работает и для **официального API** (`platform-api.max.ru`), и для **`notify.a161.ru`** (с лимитом размера по правилам сервиса).
@@ -276,11 +379,19 @@ data:
 
 > Если в URL есть `http://логин:пароль@host/...` или переданы параметры авторизации (`url_auth_login/url_auth_password`, `url_auth_token`, `url_basic_auth`) — обязательно укажите `url_auth_type`, иначе сервис вернёт ошибку валидации.
 
+[↑ Наверх](#readme-top)
+
+<a id="service-send-document"></a>
+
 ### 📎 max_notify.send_document
 
 Работает и для **официального API**, и для **`notify.a161.ru`** (с лимитом размера по правилам сервиса).
 
 Файл по пути или URL отправляется как документ. Параметры: `file`, поля URL-авторизации как у `send_photo` (`url_auth_type`, `url_auth_login`, `url_auth_password`, `url_auth_token`, `url_basic_auth` — устарело), `caption`, `entity_id` (или config_entry_id + chat_id/user_id), **`count_requests`** — см. описание у `send_photo`.
+
+[↑ Наверх](#readme-top)
+
+<a id="service-send-video"></a>
 
 ### 🎥 max_notify.send_video
 
@@ -289,6 +400,10 @@ data:
 Форматы: mp4, mov, webm, mkv. Параметры: `file`, поля URL-авторизации как у `send_photo` (`url_auth_type`, `url_auth_login`, `url_auth_password`, `url_auth_token`, `url_basic_auth` — устарело), `caption`, `entity_id` (или доп.), **`count_requests`** — число попыток при ожидании обработки вложения (для больших видео; для `notify.a161.ru` при необходимости увеличьте, если сервер ещё обрабатывает ролик).
 
 Отправка через сущность: в сценариях и автоматизациях — действие **Уведомление** → выбор сущности MaxNotify.
+
+[↑ Наверх](#readme-top)
+
+<a id="service-delete-message"></a>
 
 ### 🗑️ max_notify.delete_message
 
@@ -300,6 +415,10 @@ data:
 |----------|----------|
 | `message_id` | ID сообщения (обязательно), напр. `{{ trigger.event.data.message_id }}` |
 | `config_entry_id` | Интеграция (если несколько) |
+
+[↑ Наверх](#readme-top)
+
+<a id="service-edit-message"></a>
 
 ### ✏️ max_notify.edit_message
 
@@ -328,6 +447,13 @@ data:
   message_id: "{{ trigger.event.data.message_id }}"
   text: "Обновлённый текст"
 ```
+
+[↑ Наверх](#readme-top)
+
+---
+
+<a id="debug"></a>
+
 ## 🐞 Включение режима отладки
 
 Для того, что бы в логи начала отправляться отладочная информация нужно в файл `configuration.yaml` добавить строки:
@@ -340,7 +466,11 @@ logger:
 ```
 Затем нужно перезагрузить HomeAssistant и перейтии в раздел **Настройки -> Система -> Журнал сервера ->** справа сверху нажать троеточие и выбрать "Показать исходный журнал"
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="token-ids"></a>
 
 ## 🔑 Токен и ID
 
@@ -348,7 +478,11 @@ logger:
 
 **User ID и Chat ID:** бот [CHECK ID](https://max.ru/id222312277810_1_bot) в Max возвращает ID по пересланному сообщению. Либо через API: `GET https://platform-api.max.ru/chats` с заголовком `Authorization: <токен>` ([документация API Max](https://dev.max.ru/docs-api)).
 
+[↑ Наверх](#readme-top)
+
 ---
+
+<a id="links"></a>
 
 ## 🔗 Ссылки
 
@@ -358,3 +492,4 @@ logger:
 - [Канал в Telegram](https://t.me/kai_zer_ru_ha)
 - [Канал в Max](https://max.ru/id251603503331_biz)
 
+[↑ Наверх](#readme-top)

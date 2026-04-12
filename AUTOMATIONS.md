@@ -1,13 +1,46 @@
+<a id="automations-top"></a>
+
 # Примеры автоматизаций для MaxNotify
 
 Ниже примеры для всех сервисов интеграции `max_notify` в двух вариантах:
 - с ручным указанием параметров;
 - с подстановкой параметров из события `max_notify_received`.
 
-> Примечание: для примеров "из события" триггер предполагает событие `max_notify_received`.
+Примеры можно использовать и для записи **Official Max API** (`platform-api.max.ru`), и для **`notify.a161.ru`** — подставьте свои `config_entry_id`, `entity_id` или `recipient_id` из нужной интеграции.
+
+> **Событие `max_notify_received`** в примерах «из события» приходит и при **официальном API** (Long Polling или WebHook), и при **`notify.a161.ru`**, если в настройках записи включён **опрос обновлений (Polling)** и настроен приём.
 >
-> Поддержка кнопок (`buttons`) относится к официальному API-домену `platform-api.max.ru`.
-> Для `notify.a161.ru` отправка кнопок не поддерживается.
+> **Inline-кнопки (`buttons`)** и клавиатура из настроек интеграции поддерживаются **в обоих режимах**, в том числе для `notify.a161.ru`, в рамках возможностей [сервиса](https://notify.a161.ru/). Подробности по режимам приёма, Polling и кнопкам — в [README](README.md#notify-a161).
+>
+> В примерах с **отрицательным** `recipient_id` (групповой чат) это относится к **официальному API**. Для **`notify.a161.ru`** используется только положительный `user_id` одного получателя.
+
+<a id="содержание"></a>
+
+## Содержание
+
+- [Форматы поля buttons](#formats-buttons)
+- [max_notify.send_message](#autom-send-message)
+  - [Вручную](#autom-send-message-manual)
+  - [Из события](#autom-send-message-event)
+- [max_notify.send_photo](#autom-send-photo)
+  - [Вручную](#autom-send-photo-manual)
+  - [Из события](#autom-send-photo-event)
+- [max_notify.send_document](#autom-send-document)
+  - [Вручную](#autom-send-document-manual)
+  - [Из события](#autom-send-document-event)
+- [max_notify.send_video](#autom-send-video)
+  - [Вручную](#autom-send-video-manual)
+  - [Из события](#autom-send-video-event)
+- [max_notify.edit_message](#autom-edit-message)
+  - [Вручную](#autom-edit-message-manual)
+  - [Из события](#autom-edit-message-event)
+- [max_notify.delete_message](#autom-delete-message)
+  - [Вручную](#autom-delete-message-manual)
+  - [Из события](#autom-delete-message-event)
+
+---
+
+<a id="formats-buttons"></a>
 
 ## Форматы поля buttons
 
@@ -45,9 +78,15 @@
     - "Ряд 2 / Кнопка 1": "r2_b1"
   ```
 
+[↑ Наверх](#automations-top)
+
 ---
 
+<a id="autom-send-message"></a>
+
 ## max_notify.send_message
+
+<a id="autom-send-message-manual"></a>
 
 ### Вручную
 
@@ -70,6 +109,10 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
+<a id="autom-send-message-event"></a>
+
 ### Из события
 
 ```yaml
@@ -89,9 +132,15 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
 ---
 
+<a id="autom-send-photo"></a>
+
 ## max_notify.send_photo
+
+<a id="autom-send-photo-manual"></a>
 
 ### Вручную
 
@@ -113,6 +162,10 @@ action:
         "Открыть камеру": "cam_open"
 mode: single
 ```
+
+[↑ Наверх](#automations-top)
+
+<a id="autom-send-photo-event"></a>
 
 ### Из события
 
@@ -136,9 +189,15 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
 ---
 
+<a id="autom-send-document"></a>
+
 ## max_notify.send_document
+
+<a id="autom-send-document-manual"></a>
 
 ### Вручную
 
@@ -160,6 +219,10 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
+<a id="autom-send-document-event"></a>
+
 ### Из события
 
 ```yaml
@@ -179,9 +242,15 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
 ---
 
+<a id="autom-send-video"></a>
+
 ## max_notify.send_video
+
+<a id="autom-send-video-manual"></a>
 
 ### Вручную
 
@@ -204,6 +273,10 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
+<a id="autom-send-video-event"></a>
+
 ### Из события
 
 ```yaml
@@ -224,9 +297,15 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
 ---
 
+<a id="autom-edit-message"></a>
+
 ## max_notify.edit_message
+
+<a id="autom-edit-message-manual"></a>
 
 ### Вручную
 
@@ -247,6 +326,10 @@ action:
       format: text
 mode: single
 ```
+
+[↑ Наверх](#automations-top)
+
+<a id="autom-edit-message-event"></a>
 
 ### Из события
 
@@ -272,9 +355,15 @@ action:
 mode: single
 ```
 
+[↑ Наверх](#automations-top)
+
 ---
 
+<a id="autom-delete-message"></a>
+
 ## max_notify.delete_message
+
+<a id="autom-delete-message-manual"></a>
 
 ### Вручную
 
@@ -290,6 +379,10 @@ action:
       message_id: "1234567890"
 mode: single
 ```
+
+[↑ Наверх](#automations-top)
+
+<a id="autom-delete-message-event"></a>
 
 ### Из события
 
@@ -308,3 +401,5 @@ action:
       message_id: "{{ trigger.event.data.message_id }}"
 mode: single
 ```
+
+[↑ Наверх](#automations-top)
