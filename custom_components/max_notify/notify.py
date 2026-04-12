@@ -7,6 +7,7 @@ import base64
 import functools
 import json
 import logging
+import ssl
 import mimetypes
 import os
 import time
@@ -146,6 +147,19 @@ def _mark_a161_button_send(hass: HomeAssistant, entry: ConfigEntry) -> None:
 def _request_ssl(disable_ssl: bool) -> bool | None:
     """Return aiohttp ssl parameter from service flag."""
     return False if disable_ssl else None
+
+
+def _media_download_ssl(disable_ssl: bool) -> bool | ssl.SSLContext | None:
+    """TLS только для скачивания медиа по URL (не для Max / notify.a161 API).
+
+    По умолчанию: проверяем цепочку до УЦ, но не сверяем имя хоста с SAN (частые частные URL).
+    Полное отключение проверки — только при disable_ssl.
+    """
+    if disable_ssl:
+        return False
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    return ctx
 
 
 def _api_base_url_for_entry(entry: ConfigEntry) -> str:
@@ -357,15 +371,32 @@ def _download_http_media_digest_requests(
 ) -> tuple[int, dict[str, str], bytes]:
     """Download URL via requests HTTPDigestAuth (sync helper for executor)."""
     import requests
+    from requests.adapters import HTTPAdapter
     from requests.auth import HTTPDigestAuth
 
-    resp = requests.get(
-        url,
-        headers=headers,
-        auth=HTTPDigestAuth(username, password),
-        timeout=timeout_s,
-        verify=not disable_ssl,
-    )
+    auth = HTTPDigestAuth(username, password)
+
+    if disable_ssl:
+        resp = requests.get(
+            url,
+            headers=headers,
+            auth=auth,
+            timeout=timeout_s,
+            verify=False,
+        )
+        return resp.status_code, dict(resp.headers), resp.content
+
+    # Как aiohttp-ветка: цепочка доверия есть, сверка hostname отключена.
+    class _MediaUrlHTTPAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            kwargs["ssl_context"] = ctx
+            return super().init_poolmanager(*args, **kwargs)
+
+    session = requests.Session()
+    session.mount("https://", _MediaUrlHTTPAdapter())
+    resp = session.get(url, headers=headers, auth=auth, timeout=timeout_s)
     return resp.status_code, dict(resp.headers), resp.content
 
 
@@ -396,12 +427,14 @@ async def _download_http_media(
         url_basic_auth=url_basic_auth,
     )
 
+    download_ssl = _media_download_ssl(disable_ssl)
+
     if auth_type is None:
         return await session.get(
             normalized_url,
             headers=default_headers,
             timeout=req_timeout,
-            ssl=_request_ssl(disable_ssl),
+            ssl=download_ssl,
         )
 
     if auth_type == URL_AUTH_TYPE_BEARER:
@@ -411,7 +444,7 @@ async def _download_http_media(
             normalized_url,
             headers=headers,
             timeout=req_timeout,
-            ssl=_request_ssl(disable_ssl),
+            ssl=download_ssl,
         )
 
     if auth_type == URL_AUTH_TYPE_BASIC:
@@ -426,7 +459,7 @@ async def _download_http_media(
             normalized_url,
             headers=headers,
             timeout=req_timeout,
-            ssl=_request_ssl(disable_ssl),
+            ssl=download_ssl,
         )
 
     if auth_type == URL_AUTH_TYPE_DIGEST:
@@ -438,7 +471,7 @@ async def _download_http_media(
             normalized_url,
             headers=default_headers,
             timeout=req_timeout,
-            ssl=_request_ssl(disable_ssl),
+            ssl=download_ssl,
         )
         challenge_header = challenge_resp.headers.get("WWW-Authenticate", "")
         challenge_map = _parse_digest_challenge(challenge_header)
@@ -491,7 +524,7 @@ async def _download_http_media(
                 normalized_url,
                 headers=headers,
                 timeout=req_timeout,
-                ssl=_request_ssl(disable_ssl),
+                ssl=download_ssl,
             )
             if resp.status != 401:
                 return resp
@@ -650,7 +683,11 @@ async def _async_read_media_body_for_upload(
     url_basic_auth: str | None = None,
     disable_ssl: bool = False,
 ) -> tuple[bytes, str, str] | None:
-    """Скачать по URL или прочитать локальный файл; вернуть (body, content_type, filename)."""
+    """Скачать по URL или прочитать локальный файл; вернуть (body, content_type, filename).
+
+    Для https://: по умолчанию проверяется цепочка сертификатов без сверки hostname;
+    disable_ssl полностью отключает проверку (только скачивание источника).
+    """
     file_path_or_url = file_path_or_url.strip()
     if file_path_or_url.startswith(("http://", "https://")):
         sanitized_url, _, _ = _extract_url_auth_source(
