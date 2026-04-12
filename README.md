@@ -18,6 +18,8 @@
 - [Возможности](#features)
 - [Требования](#requirements)
 - [Установка](#install)
+  - [Через HACS](#install-hacs)
+  - [Вручную (без HACS)](#install-manual)
 - [Настройка](#configure)
   - [Официальный API](#configure-official)
   - [Сервис `notify.a161.ru`](#configure-a161)
@@ -124,11 +126,21 @@
 
 ## 🔧 Установка
 
-**HACS:** Интеграции → ⋮ → Добавить репозиторий → `https://github.com/kai-zer-ru/max-notify-ha`, категория «Интеграция». Установить **MaxNotify**, перезапустить HA.
+<a id="install-hacs"></a>
 
-**Вручную:** скопировать папку `custom_components/max_notify` в `config/custom_components/`, перезапустить HA.
+### Через HACS
 
-Добавить интеграцию: **Настройки** → **Устройства и службы** → **Добавить интеграцию** → **MaxNotify**.
+[![Открыть в Home Assistant и установить MaxNotify через HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kai-zer-ru&repository=max-notify-ha&category=integration)
+
+Если кнопка не открывается (не настроен [My Home Assistant](https://www.home-assistant.io/integrations/my/) и т.п.): **HACS** → **Интеграции** → ⋮ → **Добавить репозиторий** → вставьте `https://github.com/kai-zer-ru/max-notify-ha`, категория **Интеграция**. Установите **MaxNotify** и перезапустите Home Assistant.
+
+<a id="install-manual"></a>
+
+### Вручную (без HACS)
+
+Скопируйте папку `custom_components/max_notify` в `config/custom_components/` и перезапустите HA.
+
+После установки добавьте интеграцию: **Настройки** → **Устройства и службы** → **Добавить интеграцию** → **MaxNotify**.
 
 [↑ Наверх](#readme-top)
 
