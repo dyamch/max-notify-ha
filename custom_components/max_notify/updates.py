@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shlex
 import time
 from typing import Any
+from urllib.parse import urlencode
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -36,6 +39,93 @@ from .helpers import is_notify_a161_entry
 from .message_state import set_last_incoming_message_id
 
 _LOGGER = logging.getLogger(__name__)
+
+_UPDATES_POLLING_ISSUE_PREFIX = "updates_polling_error_"
+
+
+def _updates_polling_issue_id(entry_id: str) -> str:
+    return f"{_UPDATES_POLLING_ISSUE_PREFIX}{entry_id}"
+
+
+def _format_updates_debug_curl(
+    url: str, headers: dict[str, str], params: dict[str, Any]
+) -> str:
+    """Single-line curl for DEBUG logs (includes Authorization token)."""
+    pairs = sorted(
+        (str(k), str(v)) for k, v in params.items() if v is not None
+    )
+    qs = urlencode(pairs)
+    full_url = f"{url}?{qs}" if qs else url
+    parts: list[str] = [
+        "curl",
+        "-sS",
+        "-v",
+        "-X",
+        "GET",
+        shlex.quote(full_url),
+    ]
+    for hk, hv in headers.items():
+        parts.extend(["-H", shlex.quote(f"{hk}: {hv}")])
+    return " ".join(parts)
+
+
+def _summarize_updates_http_error(status: int, raw_text: str) -> str:
+    """Short summary for logs and Repairs placeholders."""
+    detail = f"HTTP {status}"
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return detail
+    try:
+        parsed = json.loads(raw_text)
+        if isinstance(parsed, dict):
+            code = parsed.get("code") or parsed.get("error")
+            msg = parsed.get("message") or parsed.get("error_description")
+            extra = " ".join(str(x) for x in (code, msg) if x).strip()
+            if extra:
+                return f"{detail} ({extra})"[:400]
+    except json.JSONDecodeError:
+        pass
+    snippet = raw_text.replace("\n", " ")[:220]
+    return f"{detail}: {snippet}" if snippet else detail
+
+
+def _log_updates_curl_debug(
+    entry_id: str,
+    url: str,
+    headers: dict[str, str],
+    params: dict[str, Any],
+) -> None:
+    _LOGGER.debug(
+        "GET /updates reproducible request (entry_id=%s):\n%s",
+        entry_id,
+        _format_updates_debug_curl(url, headers, params),
+    )
+
+
+def _set_updates_polling_issue(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    error_detail: str,
+    *,
+    severity: ir.IssueSeverity,
+) -> None:
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _updates_polling_issue_id(entry.entry_id),
+        breaks_in_ha_version=None,
+        is_fixable=False,
+        severity=severity,
+        translation_key="updates_polling_unavailable",
+        translation_placeholders={
+            "entry_title": entry.title or entry.entry_id,
+            "error_detail": error_detail,
+        },
+    )
+
+
+def _clear_updates_polling_issue(hass: HomeAssistant, entry_id: str) -> None:
+    ir.async_delete_issue(hass, DOMAIN, _updates_polling_issue_id(entry_id))
 
 
 def _extract_user_id(update: dict[str, Any], message: dict[str, Any], update_type: str) -> Any:
@@ -602,7 +692,21 @@ async def _polling_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 raw_text = await resp.text()
 
                 if resp.status != 200:
-                    _LOGGER.warning("GET /updates failed: status=%s body=%s", resp.status, raw_text)
+                    summary = _summarize_updates_http_error(resp.status, raw_text)
+                    _LOGGER.warning(
+                        "GET /updates failed: entry_id=%s %s",
+                        entry_id,
+                        summary,
+                    )
+                    _log_updates_curl_debug(entry_id, url, headers, params)
+                    sev = (
+                        ir.IssueSeverity.ERROR
+                        if resp.status in (401, 403)
+                        else ir.IssueSeverity.WARNING
+                    )
+                    _set_updates_polling_issue(
+                        hass, entry, summary, severity=sev
+                    )
                     await asyncio.sleep(POLLING_RETRY_DELAY)
                     continue
 
@@ -612,9 +716,19 @@ async def _polling_loop(hass: HomeAssistant, entry: ConfigEntry) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            _LOGGER.warning("GET /updates error: %s", e)
+            detail = f"{type(e).__name__}: {e}"
+            _LOGGER.warning("GET /updates error: entry_id=%s %s", entry_id, detail)
+            _log_updates_curl_debug(entry_id, url, headers, params)
+            _set_updates_polling_issue(
+                hass,
+                entry,
+                detail[:400],
+                severity=ir.IssueSeverity.WARNING,
+            )
             await asyncio.sleep(POLLING_RETRY_DELAY)
             continue
+
+        _clear_updates_polling_issue(hass, entry_id)
 
         updates_list = _extract_updates_from_payload(
             data, notify_a161_mode=notify_a161_mode

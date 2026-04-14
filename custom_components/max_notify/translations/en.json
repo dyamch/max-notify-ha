@@ -814,6 +814,10 @@
     "unsupported_ha_version_runtime": {
       "title": "MaxNotify: Home Assistant update required",
       "description": "{entry_title} was not loaded because Home Assistant Core {current_ha_version} is not supported. This integration requires Core {minimum_ha_version} or newer. Update Home Assistant, then reload the integration."
+    },
+    "updates_polling_unavailable": {
+      "title": "MaxNotify: cannot receive messages (polling)",
+      "description": "While polling for incoming updates, the Max API request failed for {entry_title}: {error_detail}. HTTP 500 with code internal.error usually means a temporary problem on the Max servers; try again later. If this keeps happening, check your network and access token. Enable debug logging for the custom_components.max_notify integration to log a copy-paste curl command (including your token) for manual API checks."
     }
   },
   "config_subentries": {
